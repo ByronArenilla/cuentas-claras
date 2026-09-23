@@ -1,0 +1,19 @@
+# Secretos y configuración local
+.env
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# Sistema operativo y editores
+.DS_Store
+.vscode/
+.idea/
