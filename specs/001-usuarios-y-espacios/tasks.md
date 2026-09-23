@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## T1 — Esqueleto de la API y `Makefile`
+## [x] T1 — Esqueleto de la API y `Makefile`
 Crear `services/api/pyproject.toml` con las dependencias del plan y la
 configuración de `ruff`, la app de FastAPI con `GET /health`, y el
 `Makefile` de la raíz con `install`, `run-api`, `test` y `lint`.

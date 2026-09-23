@@ -1,0 +1,42 @@
+[project]
+name = "budget-ops-api"
+version = "0.1.0"
+description = "API de budget-ops: usuarios, espacios y presupuesto."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "argon2-cffi",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+    "ruff",
+]
+
+# Se instala como paquete editable para que `import app` funcione en tests.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# El stack fija Python 3.12: ruff no permite sintaxis más nueva.
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+# E/F: errores base, I: orden de imports, UP: sintaxis moderna,
+# B: bugs comunes, ANN: type hints en funciones públicas (AGENTS.md).
+select = ["E", "F", "I", "UP", "B", "ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
