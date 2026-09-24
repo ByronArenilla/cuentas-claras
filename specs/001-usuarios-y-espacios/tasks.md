@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## T1 — Esqueleto de la API y `Makefile`
+## [x] T1 — Esqueleto de la API y `Makefile`
 Crear `services/api/pyproject.toml` con las dependencias del plan y la
 configuración de `ruff`, la app de FastAPI con `GET /health`, y el
 `Makefile` de la raíz con `install`, `run-api`, `test` y `lint`.
@@ -15,7 +15,7 @@ configuración de `ruff`, la app de FastAPI con `GET /health`, y el
   raíz y `make run-api` levanta el servicio.
 - RF: RF-34.
 
-## T2 — Configuración que falla al arrancar
+## [x] T2 — Configuración que falla al arrancar
 `app/config.py` lee `DATABASE_URL` y `TZ` una sola vez y termina con un
 error que nombra la variable que falta.
 
@@ -25,7 +25,7 @@ error que nombra la variable que falta.
   en lugar de arrancar a medias.
 - RF: RF-33.
 
-## T3 — Base de datos y modelos
+## [x] T3 — Base de datos y modelos
 `app/db.py` (motor, sesión, `create_all`, `PRAGMA foreign_keys=ON` en cada
 conexión) y `app/models.py` con `users`, `spaces`, `memberships`,
 `invitations` y `sessions`.
@@ -37,7 +37,7 @@ conexión) y `app/models.py` con `users`, `spaces`, `memberships`,
   `conftest.py`.
 - RF: base de RF-3, RF-20, RF-23, RF-27.
 
-## T4 — Contraseñas y tokens
+## [x] T4 — Contraseñas y tokens
 `app/security.py`: hash y verificación con Argon2id, generación de tokens
 con `secrets` y su hash SHA-256.
 
@@ -47,7 +47,7 @@ con `secrets` y su hash SHA-256.
 - Hecho cuando: los tests pasan y ninguna función devuelve la contraseña.
 - RF: RF-6.
 
-## T5 — Registro del primer usuario
+## [x] T5 — Registro del primer usuario
 `POST /auth/register`: crea usuario, espacio personal y membresía en una
 transacción. Sin usuarios en la base de datos, no exige invitación.
 
@@ -58,7 +58,7 @@ transacción. Sin usuarios en la base de datos, no exige invitación.
   igual que estaba.
 - RF: RF-1, RF-3, RF-4, RF-5, RF-7.
 
-## T6 — Sesión: entrar, identificarse y salir
+## [x] T6 — Sesión: entrar, identificarse y salir
 `POST /auth/login`, `POST /auth/logout`, `GET /me` y la dependencia
 `current_user`.
 
@@ -71,7 +71,7 @@ transacción. Sin usuarios en la base de datos, no exige invitación.
   de la spec.
 - RF: RF-8 a RF-12.
 
-## T7 — Registro cerrado e invitación de instancia
+## [x] T7 — Registro cerrado e invitación de instancia
 `POST /invitations/instance` y la regla de que, existiendo ya algún usuario,
 el registro exige un código vigente.
 
@@ -82,7 +82,7 @@ el registro exige un código vigente.
   cuando la base de datos está vacía.
 - RF: RF-2, RF-16, RF-19.
 
-## T8 — Espacios y la dependencia `member_space`
+## [x] T8 — Espacios y la dependencia `member_space`
 `GET /spaces`, `POST /spaces` y la dependencia que resuelve el espacio solo
 para sus miembros.
 
@@ -93,7 +93,7 @@ para sus miembros.
   `space_id` sin pasar por la dependencia.
 - RF: RF-13, RF-14, RF-29, RF-30.
 
-## T9 — Invitación de espacio
+## [x] T9 — Invitación de espacio
 `POST /spaces/{id}/invitations`, `POST /invitations/{code}/redeem` y el
 registro con invitación de espacio.
 
@@ -105,16 +105,17 @@ registro con invitación de espacio.
 - Hecho cuando: los tests pasan, incluido el criterio 5 de la spec.
 - RF: RF-15, RF-17, RF-18, RF-19, RF-20.
 
-## T10 — Salir de un espacio
+## [x] T10 — Salir de un espacio
 `DELETE /spaces/{id}/members/me`.
 
 - Test primero: un miembro sale y deja de verlo en su listado; los datos del
   espacio siguen ahí para el resto; el último miembro no puede salir y el
-  mensaje explica que la vía es borrarlo.
+  mensaje explica que la vía es borrarlo; nadie puede salir de su único
+  espacio.
 - Hecho cuando: los tests pasan.
-- RF: RF-21, RF-22.
+- RF: RF-21, RF-22, RF-35.
 
-## T11 — Borrar un espacio
+## [x] T11 — Borrar un espacio
 `DELETE /spaces/{id}?confirm=<nombre>`.
 
 - Test primero: el único miembro lo borra confirmando el nombre exacto; con
@@ -124,7 +125,7 @@ registro con invitación de espacio.
 - Hecho cuando: los tests pasan, incluido el criterio 6 de la spec.
 - RF: RF-23 a RF-27.
 
-## T12 — Cierre: aislamiento y documentación
+## [x] T12 — Cierre: aislamiento y documentación
 `tests/test_isolation.py` reuniendo los criterios 1 y 2 de la spec, y
 actualización del `README.md` y del `docs/roadmap.md`.
 
