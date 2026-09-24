@@ -25,7 +25,7 @@ error que nombra la variable que falta.
   en lugar de arrancar a medias.
 - RF: RF-33.
 
-## T3 — Base de datos y modelos
+## [x] T3 — Base de datos y modelos
 `app/db.py` (motor, sesión, `create_all`, `PRAGMA foreign_keys=ON` en cada
 conexión) y `app/models.py` con `users`, `spaces`, `memberships`,
 `invitations` y `sessions`.
