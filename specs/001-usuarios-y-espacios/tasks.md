@@ -105,14 +105,15 @@ registro con invitación de espacio.
 - Hecho cuando: los tests pasan, incluido el criterio 5 de la spec.
 - RF: RF-15, RF-17, RF-18, RF-19, RF-20.
 
-## T10 — Salir de un espacio
+## [x] T10 — Salir de un espacio
 `DELETE /spaces/{id}/members/me`.
 
 - Test primero: un miembro sale y deja de verlo en su listado; los datos del
   espacio siguen ahí para el resto; el último miembro no puede salir y el
-  mensaje explica que la vía es borrarlo.
+  mensaje explica que la vía es borrarlo; nadie puede salir de su único
+  espacio.
 - Hecho cuando: los tests pasan.
-- RF: RF-21, RF-22.
+- RF: RF-21, RF-22, RF-35.
 
 ## T11 — Borrar un espacio
 `DELETE /spaces/{id}?confirm=<nombre>`.
