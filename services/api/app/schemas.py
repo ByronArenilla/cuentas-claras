@@ -59,6 +59,27 @@ class RegisterIn(BaseModel):
         return value
 
 
+MAX_SPACE_NAME_LENGTH = 100
+
+
+class SpaceIn(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, value: str) -> str:
+        # Sin espacios alrededor: el nombre se confirma letra a letra al
+        # borrar el espacio (RF-25) y un espacio invisible lo haría imposible.
+        name = value.strip()
+        if not 1 <= len(name) <= MAX_SPACE_NAME_LENGTH:
+            raise PydanticCustomError(
+                "invalid_space_name",
+                "El nombre del espacio debe tener entre 1 y {max_length} caracteres.",
+                {"max_length": MAX_SPACE_NAME_LENGTH},
+            )
+        return name
+
+
 class SpaceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

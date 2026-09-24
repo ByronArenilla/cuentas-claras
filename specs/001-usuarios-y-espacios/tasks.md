@@ -82,7 +82,7 @@ el registro exige un código vigente.
   cuando la base de datos está vacía.
 - RF: RF-2, RF-16, RF-19.
 
-## T8 — Espacios y la dependencia `member_space`
+## [x] T8 — Espacios y la dependencia `member_space`
 `GET /spaces`, `POST /spaces` y la dependencia que resuelve el espacio solo
 para sus miembros.
 
