@@ -4,6 +4,8 @@ Las salidas se declaran campo a campo: así ninguna respuesta puede incluir
 por accidente el hash de la contraseña (RF-7).
 """
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic_core import PydanticCustomError
 
@@ -65,3 +67,23 @@ class RegisterOut(BaseModel):
     id: int
     email: str
     personal_space: SpaceOut
+
+
+class LoginIn(BaseModel):
+    # Sin validar formato ni longitud: unas credenciales mal escritas se
+    # rechazan con el mismo mensaje que unas equivocadas (RF-9).
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str

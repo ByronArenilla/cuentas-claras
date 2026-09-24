@@ -58,7 +58,7 @@ transacción. Sin usuarios en la base de datos, no exige invitación.
   igual que estaba.
 - RF: RF-1, RF-3, RF-4, RF-5, RF-7.
 
-## T6 — Sesión: entrar, identificarse y salir
+## [x] T6 — Sesión: entrar, identificarse y salir
 `POST /auth/login`, `POST /auth/logout`, `GET /me` y la dependencia
 `current_user`.
 

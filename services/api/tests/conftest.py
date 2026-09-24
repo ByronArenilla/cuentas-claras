@@ -1,5 +1,5 @@
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -43,3 +43,20 @@ def client(engine: Engine) -> Iterator[TestClient]:
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+PASSWORD = "una-contraseña-larga"
+
+
+@pytest.fixture
+def login(client: TestClient) -> Callable[[str], dict[str, str]]:
+    """Registra un usuario, inicia su sesión y devuelve la cabecera con el token."""
+
+    def _login(email: str = "ana@example.com") -> dict[str, str]:
+        client.post("/auth/register", json={"email": email, "password": PASSWORD})
+        response = client.post(
+            "/auth/login", json={"email": email, "password": PASSWORD}
+        )
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _login
