@@ -125,7 +125,7 @@ registro con invitación de espacio.
 - Hecho cuando: los tests pasan, incluido el criterio 6 de la spec.
 - RF: RF-23 a RF-27.
 
-## T12 — Cierre: aislamiento y documentación
+## [x] T12 — Cierre: aislamiento y documentación
 `tests/test_isolation.py` reuniendo los criterios 1 y 2 de la spec, y
 actualización del `README.md` y del `docs/roadmap.md`.
 

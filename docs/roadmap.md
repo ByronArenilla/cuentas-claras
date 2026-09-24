@@ -1,7 +1,7 @@
 # Roadmap — budget-ops
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 001-usuarios-y-espacios
+> **Spec activa:** 002-api-gastos
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -9,7 +9,7 @@ Cada fase introduce una herramienta. Una spec empieza cuando la anterior
 está validada. Marca con [x] las specs terminadas.
 
 ## Fase 1 — Aplicación y SDD
-- [ ] 001-usuarios-y-espacios — Usuarios, espacios y membresías; todo dato cuelga de un espacio.
+- [x] 001-usuarios-y-espacios — Usuarios, espacios y membresías; todo dato cuelga de un espacio.
 - [ ] 002-api-gastos — Registrar, listar, editar y borrar gastos.
 - [ ] 003-categorias — Categorías predefinidas y creación de nuevas.
 - [ ] 004-presupuesto-mensual — Presupuesto por categoría y mes; resumen gastado vs. presupuestado.
