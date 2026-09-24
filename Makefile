@@ -19,9 +19,19 @@ install:
 	$(API_BIN)/pip install --upgrade pip
 	$(API_BIN)/pip install -e "$(API_DIR)[dev]"
 
+# Carga .env (si existe) en el entorno de la receta: `set -a` exporta cada
+# variable que el shell define al leerlo con `.`. Los tests no lo usan: su
+# entorno lo fija tests/conftest.py.
+LOAD_ENV := set -a; if [ -f .env ]; then . ./.env; fi; set +a
+
+# Primero se importa la configuración: si falta una variable obligatoria el
+# error la nombra y make se detiene (RF-33). Sin esta comprobación, el proceso
+# de --reload de uvicorn mostraría el error pero seguiría vivo sin servir nada.
 # --reload reinicia el servidor al cambiar el código (solo para desarrollo).
 run-api:
-	cd $(API_DIR) && .venv/bin/uvicorn app.main:app --reload --port 8000
+	$(LOAD_ENV); cd $(API_DIR) \
+		&& .venv/bin/python -c "import app.config" \
+		&& .venv/bin/uvicorn app.main:app --reload --port 8000
 
 test:
 	cd $(API_DIR) && .venv/bin/pytest

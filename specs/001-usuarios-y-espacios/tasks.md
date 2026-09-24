@@ -15,7 +15,7 @@ configuración de `ruff`, la app de FastAPI con `GET /health`, y el
   raíz y `make run-api` levanta el servicio.
 - RF: RF-34.
 
-## T2 — Configuración que falla al arrancar
+## [x] T2 — Configuración que falla al arrancar
 `app/config.py` lee `DATABASE_URL` y `TZ` una sola vez y termina con un
 error que nombra la variable que falta.
 
