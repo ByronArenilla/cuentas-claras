@@ -74,6 +74,9 @@ specs siguientes pueden colgar sus datos de un espacio.
    registro no pide nombre de espacio: cada usuario solo ve los suyos, así
    que no hay confusión, y el nombre a confirmar al borrarlo (RF-25) es
    predecible.
+8. **Nadie sale de su único espacio** (2026-09-24). Igual que RF-26 impide
+   borrarlo, salir del último espacio que le queda a un usuario se rechaza:
+   así nadie se queda sin sitio donde registrar gastos (RF-35).
 
 ## Requisitos funcionales
 
@@ -143,6 +146,9 @@ specs siguientes pueden colgar sus datos de un espacio.
 - **RF-22** SI un usuario intenta salir de un espacio siendo su último
   miembro, ENTONCES el sistema DEBE rechazarlo e indicar que la vía para
   deshacerse de ese espacio es borrarlo.
+- **RF-35** SI un usuario intenta salir del único espacio del que es
+  miembro, ENTONCES el sistema DEBE rechazarlo, para que nadie quede sin
+  ningún sitio donde registrar gastos.
 
 ### Borrado de espacios
 
