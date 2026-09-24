@@ -166,6 +166,13 @@ dato observable; las specs 002 a 004 los ampliarán con gastos reales.
   que la API lo acepta por la cabecera `Authorization`.
 - **No hay límite de intentos de inicio de sesión.** Con registro cerrado el
   riesgo es menor, pero conviene anotarlo para `008-control-acceso`.
+- **El código de invitación viaja en la URL** de
+  `POST /invitations/{code}/redeem`, así que queda escrito en el log de
+  accesos de uvicorn y, desde la fase 3, en el de Nginx. Se acepta por ahora:
+  el código es de un solo uso y caduca en 24 horas, pero quien lea los logs
+  podría canjear uno todavía sin usar. `010-reverse-proxy` debe decidir si
+  Nginx enmascara esa ruta en sus logs o si el código pasa al cuerpo de la
+  petición.
 - **RF-4 permite saber si un correo ya está registrado** a quien tenga una
   invitación válida. Se acepta: el registro es cerrado y el mensaje claro
   vale más que ocultar ese detalle a alguien ya invitado.
