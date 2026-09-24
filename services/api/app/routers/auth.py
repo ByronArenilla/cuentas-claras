@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import current_session, current_user
-from app.models import Membership, Space, User
+from app.models import Invitation, Membership, Space, User
 from app.models import Session as SessionRow
+from app.routers.invitations import claim_invitation, find_valid_invitation
 from app.schemas import LoginIn, RegisterIn, RegisterOut, SpaceOut, TokenOut, UserOut
 from app.security import (
     generate_session_token,
@@ -26,6 +27,9 @@ PERSONAL_SPACE_NAME = "Personal"
 SESSION_LIFETIME = timedelta(days=15)
 
 EMAIL_TAKEN = "Ya existe una cuenta con ese correo."
+INVITATION_REQUIRED = "El registro requiere un código de invitación."
+# Mismo mensaje si el código no existe, ya se usó o caducó (RF-19).
+INVITATION_INVALID = "El código de invitación no es válido, ya se usó o caducó."
 
 # Mismo mensaje falle el correo o la contraseña (RF-9).
 BAD_CREDENTIALS = "Correo o contraseña incorrectos."
@@ -40,7 +44,21 @@ router = APIRouter(tags=["auth"])
 
 @router.post("/auth/register", status_code=status.HTTP_201_CREATED)
 def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> RegisterOut:
-    """Crea usuario, espacio personal y membresía en una sola transacción."""
+    """Crea usuario, espacio personal y membresía en una sola transacción.
+
+    El primer usuario de la instancia se registra sin código (RF-1); a partir
+    de ahí, el registro exige una invitación vigente (RF-2).
+    """
+    invitation: Invitation | None = None
+    if db.scalar(select(User.id).limit(1)) is not None:
+        if data.invitation_code is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, INVITATION_REQUIRED)
+        invitation = find_valid_invitation(db, data.invitation_code)
+        if invitation is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, INVITATION_INVALID)
+
+    # El correo se comprueba después del código: solo quien tiene una
+    # invitación válida puede averiguar si un correo existe (plan 001).
     if db.scalar(select(User.id).where(User.email == data.email)) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, EMAIL_TAKEN)
 
@@ -50,6 +68,11 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
     try:
         db.flush()
         db.add(Membership(user_id=user.id, space_id=space.id))
+        # El código se marca en la misma transacción que crea el usuario: si
+        # otra petición lo usó justo antes, se deshace todo (RF-19).
+        if invitation is not None and not claim_invitation(db, invitation, user.id):
+            db.rollback()
+            raise HTTPException(status.HTTP_403_FORBIDDEN, INVITATION_INVALID)
         db.commit()
     except IntegrityError:
         # Otra petición registró el mismo correo entre la comprobación y el

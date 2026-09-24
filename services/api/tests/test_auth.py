@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
@@ -67,12 +69,13 @@ def test_email_is_normalized_to_lowercase(client: TestClient) -> None:
 
 
 def test_repeated_email_is_rejected_and_nothing_is_created(
-    client: TestClient, engine: Engine
+    client: TestClient, engine: Engine, login: Callable[[str], dict[str, str]]
 ) -> None:
-    register(client)
+    ana = login("ana@example.com")
+    code = client.post("/invitations/instance", headers=ana).json()["code"]
     before = row_counts(engine)
 
-    response = register(client, "ANA@example.com")
+    response = register(client, "ANA@example.com", invitation_code=code)
 
     assert response.status_code == 409
     assert "correo" in response.json()["detail"]

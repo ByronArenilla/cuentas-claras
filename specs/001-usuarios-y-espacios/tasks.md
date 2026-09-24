@@ -71,7 +71,7 @@ transacción. Sin usuarios en la base de datos, no exige invitación.
   de la spec.
 - RF: RF-8 a RF-12.
 
-## T7 — Registro cerrado e invitación de instancia
+## [x] T7 — Registro cerrado e invitación de instancia
 `POST /invitations/instance` y la regla de que, existiendo ya algún usuario,
 el registro exige un código vigente.
 

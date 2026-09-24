@@ -50,13 +50,25 @@ PASSWORD = "una-contraseña-larga"
 
 @pytest.fixture
 def login(client: TestClient) -> Callable[[str], dict[str, str]]:
-    """Registra un usuario, inicia su sesión y devuelve la cabecera con el token."""
+    """Registra un usuario, inicia su sesión y devuelve la cabecera con el token.
+
+    El registro es cerrado (RF-2): el primer usuario entra sin código y cada
+    usuario siguiente se registra con una invitación de instancia que emite
+    el primero.
+    """
+    first_user: dict[str, str] = {}
 
     def _login(email: str = "ana@example.com") -> dict[str, str]:
-        client.post("/auth/register", json={"email": email, "password": PASSWORD})
+        body = {"email": email, "password": PASSWORD}
+        if first_user:
+            invitation = client.post("/invitations/instance", headers=first_user)
+            body["invitation_code"] = invitation.json()["code"]
+        client.post("/auth/register", json=body).raise_for_status()
         response = client.post(
             "/auth/login", json={"email": email, "password": PASSWORD}
         )
-        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+        headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+        first_user.setdefault("Authorization", headers["Authorization"])
+        return headers
 
     return _login
