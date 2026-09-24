@@ -9,10 +9,12 @@ import pytest
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["TZ"] = "America/Bogota"
 
+from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import Engine  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-from app.db import build_engine, create_all  # noqa: E402
+from app.db import build_engine, create_all, get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest.fixture
@@ -28,3 +30,16 @@ def engine() -> Iterator[Engine]:
 def session(engine: Engine) -> Iterator[Session]:
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def client(engine: Engine) -> Iterator[TestClient]:
+    """Cliente HTTP de la API conectado a la base de datos en memoria del test."""
+
+    def override_get_db() -> Iterator[Session]:
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield TestClient(app)
+    app.dependency_overrides.clear()

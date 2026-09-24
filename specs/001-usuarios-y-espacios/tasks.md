@@ -47,7 +47,7 @@ con `secrets` y su hash SHA-256.
 - Hecho cuando: los tests pasan y ninguna función devuelve la contraseña.
 - RF: RF-6.
 
-## T5 — Registro del primer usuario
+## [x] T5 — Registro del primer usuario
 `POST /auth/register`: crea usuario, espacio personal y membresía en una
 transacción. Sin usuarios en la base de datos, no exige invitación.
 

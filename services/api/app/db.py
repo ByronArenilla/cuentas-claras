@@ -5,9 +5,11 @@ SQLite ignora las claves foráneas salvo que cada conexión las active con
 entre tablas serían decorativas (RF-23, RF-27).
 """
 
+from collections.abc import Iterator
+
 from sqlalchemy import Engine, create_engine, event, make_url
 from sqlalchemy.engine.interfaces import DBAPIConnection
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry, StaticPool
 
 from app.config import settings
@@ -48,3 +50,9 @@ def create_all(engine: Engine) -> None:
 
 engine = build_engine(settings.database_url)
 SessionLocal = sessionmaker(engine)
+
+
+def get_db() -> Iterator[Session]:
+    """Dependencia de FastAPI: una sesión por petición, cerrada al terminar."""
+    with SessionLocal() as db:
+        yield db
