@@ -37,7 +37,7 @@ conexión) y `app/models.py` con `users`, `spaces`, `memberships`,
   `conftest.py`.
 - RF: base de RF-3, RF-20, RF-23, RF-27.
 
-## T4 — Contraseñas y tokens
+## [x] T4 — Contraseñas y tokens
 `app/security.py`: hash y verificación con Argon2id, generación de tokens
 con `secrets` y su hash SHA-256.
 
