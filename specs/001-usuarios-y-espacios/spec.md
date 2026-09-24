@@ -70,6 +70,10 @@ specs siguientes pueden colgar sus datos de un espacio.
    que un gasto caiga en un espacio distinto del que el usuario cree.
 6. **Un espacio solo lo borra su único miembro**, confirmando con el nombre
    exacto. Así quien confirma es siempre quien pierde los datos.
+7. **El espacio personal se llama siempre "Personal"** (2026-09-24). El
+   registro no pide nombre de espacio: cada usuario solo ve los suyos, así
+   que no hay confusión, y el nombre a confirmar al borrarlo (RF-25) es
+   predecible.
 
 ## Requisitos funcionales
 
