@@ -7,7 +7,8 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from app.deps import member_space
-from app.models import Membership, Space, User
+from app.models import Invitation, Membership, Space, User
+from app.security import hash_token
 
 Login = Callable[..., dict[str, str]]
 
@@ -218,3 +219,134 @@ def test_leaving_requires_a_session(
 
     assert client.delete(f"/spaces/{space_id}/members/me").status_code == 401
     assert names(client, bea) == ["Personal", "Casa"]
+
+
+# --- Borrar un espacio (RF-23 a RF-27) ---
+
+
+def delete_space(
+    client: TestClient, headers: dict[str, str], space_id: int, confirm: str
+):
+    return client.delete(
+        f"/spaces/{space_id}", params={"confirm": confirm}, headers=headers
+    )
+
+
+def test_sole_member_deletes_confirming_the_exact_name(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana = login()
+    space_id = create_space(client, ana, "Viajes")["id"]
+
+    response = delete_space(client, ana, space_id, "Viajes")
+
+    assert response.status_code == 204
+    assert names(client, ana) == ["Personal"]
+    with Session(engine) as db:
+        assert db.get(Space, space_id) is None
+        assert (
+            db.scalars(select(Membership).where(Membership.space_id == space_id)).all()
+            == []
+        )
+
+
+@pytest.mark.parametrize("confirm", ["Viaje", "viajes", "Viajes ", ""])
+def test_wrong_confirmation_deletes_nothing(
+    client: TestClient, login: Login, confirm: str
+) -> None:
+    ana = login()
+    space_id = create_space(client, ana, "Viajes")["id"]
+
+    response = delete_space(client, ana, space_id, confirm)
+
+    assert response.status_code == 400
+    assert "nombre" in response.json()["detail"]
+    assert names(client, ana) == ["Personal", "Viajes"]
+
+
+def test_missing_confirmation_deletes_nothing(client: TestClient, login: Login) -> None:
+    ana = login()
+    space_id = create_space(client, ana, "Viajes")["id"]
+
+    response = client.delete(f"/spaces/{space_id}", headers=ana)
+
+    assert response.status_code == 422
+    assert names(client, ana) == ["Personal", "Viajes"]
+
+
+def test_space_with_several_members_cannot_be_deleted(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    space_id, ana, bea = shared_space
+
+    response = delete_space(client, ana, space_id, "Casa")
+
+    assert response.status_code == 409
+    assert names(client, ana) == names(client, bea) == ["Personal", "Casa"]
+
+
+def test_only_space_cannot_be_deleted(client: TestClient, login: Login) -> None:
+    ana = login()
+    [personal] = client.get("/spaces", headers=ana).json()
+
+    response = delete_space(client, ana, personal["id"], "Personal")
+
+    assert response.status_code == 409
+    assert "único espacio" in response.json()["detail"]
+    assert names(client, ana) == ["Personal"]
+
+
+def test_deleting_a_space_leaves_the_user_and_other_spaces_intact(
+    client: TestClient, engine: Engine, shared_space: SharedSpace
+) -> None:
+    # Criterio de validación 6 (RF-27): Ana borra "Viajes" y nada más cambia.
+    casa_id, ana, bea = shared_space
+    viajes_id = create_space(client, ana, "Viajes")["id"]
+    casa_code = client.post(f"/spaces/{casa_id}/invitations", headers=ana).json()
+
+    delete_space(client, ana, viajes_id, "Viajes")
+
+    assert client.get("/me", headers=ana).status_code == 200
+    assert names(client, ana) == names(client, bea) == ["Personal", "Casa"]
+    with Session(engine) as db:
+        casa_members = db.scalars(
+            select(Membership).where(Membership.space_id == casa_id)
+        ).all()
+        casa_invitation = db.scalar(
+            select(Invitation).where(
+                Invitation.code_hash == hash_token(casa_code["code"])
+            )
+        )
+    assert len(casa_members) == 2
+    assert casa_invitation is not None
+
+
+def test_pending_invitations_die_with_the_space(
+    client: TestClient, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Viajes")["id"]
+    code = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["code"]
+
+    delete_space(client, ana, space_id, "Viajes")
+
+    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 403
+    assert names(client, bea) == ["Personal"]
+
+
+def test_deleting_a_foreign_space_is_404(client: TestClient, login: Login) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Viajes")["id"]
+
+    assert delete_space(client, bea, space_id, "Viajes").status_code == 404
+    assert names(client, ana) == ["Personal", "Viajes"]
+
+
+def test_deleting_requires_a_session(client: TestClient, login: Login) -> None:
+    ana = login()
+    space_id = create_space(client, ana, "Viajes")["id"]
+
+    response = client.delete(f"/spaces/{space_id}", params={"confirm": "Viajes"})
+
+    assert response.status_code == 401
+    assert names(client, ana) == ["Personal", "Viajes"]

@@ -1,4 +1,4 @@
-"""Espacios: crear, listar, invitar y salir (RF-13 a RF-15, RF-21, RF-22, RF-35).
+"""Espacios: crear, listar, invitar, salir y borrar (RF-13 a RF-27, RF-35).
 
 Las rutas que reciben un `space_id` resuelven el espacio con la dependencia
 `member_space`, nunca consultando por `space_id` directamente (RF-29).
@@ -18,6 +18,12 @@ from app.routers.invitations import issue_invitation
 from app.schemas import InvitationOut, SpaceIn, SpaceOut
 
 ONLY_SPACE = "No puedes salir de tu único espacio: necesitas al menos uno."
+ONLY_SPACE_DELETE = "No puedes borrar tu único espacio: necesitas al menos uno."
+SHARED_SPACE = (
+    "Este espacio tiene más miembros. Solo se puede borrar cuando eres "
+    "su único miembro."
+)
+WRONG_CONFIRMATION = "El nombre de confirmación no coincide con el del espacio."
 LAST_MEMBER = (
     "Eres el último miembro de este espacio y no puedes salir. "
     "Si quieres deshacerte de él, bórralo."
@@ -104,5 +110,43 @@ def leave_space(
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, LAST_MEMBER)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{space_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_space(
+    space: Annotated[Space, Depends(member_space)],
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    confirm: str,
+) -> Response:
+    """Borra el espacio y, en cascada, sus membresías, invitaciones y datos.
+
+    El nombre de confirmación viaja como parámetro de consulta porque un
+    `DELETE` con cuerpo es ambiguo (plan 001). Se compara tal cual: sin
+    quitar espacios ni ignorar mayúsculas (RF-25).
+    """
+    if db.scalar(select(count_members(space.id))) > 1:
+        raise HTTPException(status.HTTP_409_CONFLICT, SHARED_SPACE)
+    if db.scalar(select(count_spaces(user.id))) <= 1:
+        raise HTTPException(status.HTTP_409_CONFLICT, ONLY_SPACE_DELETE)
+    if confirm != space.name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, WRONG_CONFIRMATION)
+
+    # Las condiciones se repiten dentro del DELETE: si alguien canjea una
+    # invitación justo ahora, la sentencia no borra nada y nadie pierde un
+    # espacio que no aceptó perder (RF-24). El resto lo borra la base de datos
+    # con ON DELETE CASCADE (RF-23).
+    result = db.execute(
+        delete(Space).where(
+            Space.id == space.id,
+            count_members(space.id) == 1,
+            count_spaces(user.id) > 1,
+        )
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, SHARED_SPACE)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

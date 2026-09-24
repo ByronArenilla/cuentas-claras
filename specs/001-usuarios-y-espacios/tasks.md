@@ -115,7 +115,7 @@ registro con invitación de espacio.
 - Hecho cuando: los tests pasan.
 - RF: RF-21, RF-22, RF-35.
 
-## T11 — Borrar un espacio
+## [x] T11 — Borrar un espacio
 `DELETE /spaces/{id}?confirm=<nombre>`.
 
 - Test primero: el único miembro lo borra confirmando el nombre exacto; con
