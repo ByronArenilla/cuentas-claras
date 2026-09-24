@@ -12,7 +12,11 @@ from app.db import get_db
 from app.deps import current_session, current_user
 from app.models import Invitation, Membership, Space, User
 from app.models import Session as SessionRow
-from app.routers.invitations import claim_invitation, find_valid_invitation
+from app.routers.invitations import (
+    INVITATION_INVALID,
+    claim_invitation,
+    find_valid_invitation,
+)
 from app.schemas import LoginIn, RegisterIn, RegisterOut, SpaceOut, TokenOut, UserOut
 from app.security import (
     generate_session_token,
@@ -28,8 +32,6 @@ SESSION_LIFETIME = timedelta(days=15)
 
 EMAIL_TAKEN = "Ya existe una cuenta con ese correo."
 INVITATION_REQUIRED = "El registro requiere un código de invitación."
-# Mismo mensaje si el código no existe, ya se usó o caducó (RF-19).
-INVITATION_INVALID = "El código de invitación no es válido, ya se usó o caducó."
 
 # Mismo mensaje falle el correo o la contraseña (RF-9).
 BAD_CREDENTIALS = "Correo o contraseña incorrectos."
@@ -47,7 +49,8 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
     """Crea usuario, espacio personal y membresía en una sola transacción.
 
     El primer usuario de la instancia se registra sin código (RF-1); a partir
-    de ahí, el registro exige una invitación vigente (RF-2).
+    de ahí, el registro exige una invitación vigente (RF-2). Con invitación de
+    espacio, el usuario queda además como miembro de ese espacio (RF-18).
     """
     invitation: Invitation | None = None
     if db.scalar(select(User.id).limit(1)) is not None:
@@ -68,6 +71,9 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
     try:
         db.flush()
         db.add(Membership(user_id=user.id, space_id=space.id))
+        # Con invitación de espacio, además entra en ese espacio (RF-18).
+        if invitation is not None and invitation.kind == "space":
+            db.add(Membership(user_id=user.id, space_id=invitation.space_id))
         # El código se marca en la misma transacción que crea el usuario: si
         # otra petición lo usó justo antes, se deshace todo (RF-19).
         if invitation is not None and not claim_invitation(db, invitation, user.id):

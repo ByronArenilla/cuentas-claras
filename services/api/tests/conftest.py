@@ -72,3 +72,15 @@ def login(client: TestClient) -> Callable[[str], dict[str, str]]:
         return headers
 
     return _login
+
+
+@pytest.fixture
+def shared_space(
+    client: TestClient, login: Callable[[str], dict[str, str]]
+) -> tuple[int, dict[str, str], dict[str, str]]:
+    """Espacio "Casa" con dos miembros, Ana y Bea: (id, cabecera Ana, cabecera Bea)."""
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = client.post("/spaces", json={"name": "Casa"}, headers=ana).json()["id"]
+    code = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["code"]
+    client.post(f"/invitations/{code}/redeem", headers=bea).raise_for_status()
+    return space_id, ana, bea

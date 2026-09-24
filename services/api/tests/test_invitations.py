@@ -189,3 +189,183 @@ def test_a_code_can_only_be_claimed_once(
 
         assert claim_invitation(db, row, ana_id) is True
         assert claim_invitation(db, row, ana_id) is False
+
+
+# --- Invitación de espacio (RF-15, RF-17, RF-18, RF-20) ---
+
+
+def issue_space_invitation(
+    client: TestClient, headers: dict[str, str], space_id: int
+) -> str:
+    response = client.post(f"/spaces/{space_id}/invitations", headers=headers)
+    assert response.status_code == 201
+    return response.json()["code"]
+
+
+def create_space(client: TestClient, headers: dict[str, str], name: str) -> int:
+    return client.post("/spaces", json={"name": name}, headers=headers).json()["id"]
+
+
+def space_names(client: TestClient, headers: dict[str, str]) -> list[str]:
+    return [space["name"] for space in client.get("/spaces", headers=headers).json()]
+
+
+def test_space_invitation_is_stored_hashed_and_lasts_a_day(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana = login("ana@example.com")
+    space_id = create_space(client, ana, "Casa")
+
+    code = issue_space_invitation(client, ana, space_id)
+
+    row = invitation(engine, code)
+    assert row.code_hash != code
+    assert (row.kind, row.space_id, row.used_at) == ("space", space_id, None)
+    expected = datetime.now(UTC) + timedelta(hours=24)
+    assert abs(row.expires_at - expected) < timedelta(minutes=1)
+
+
+def test_non_member_cannot_issue_space_invitations(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Casa")
+
+    response = client.post(f"/spaces/{space_id}/invitations", headers=bea)
+
+    # 404 como un espacio inexistente: Bea no sabe que "Casa" existe (RF-30).
+    assert response.status_code == 404
+    with Session(engine) as db:
+        space_invitations = select(func.count()).where(Invitation.kind == "space")
+        assert db.scalar(space_invitations) == 0
+
+
+def test_issuing_space_invitations_requires_a_session(
+    client: TestClient, login: Login
+) -> None:
+    space_id = create_space(client, login(), "Casa")
+
+    assert client.post(f"/spaces/{space_id}/invitations").status_code == 401
+
+
+def test_redeeming_makes_the_user_a_member(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Casa")
+    code = issue_space_invitation(client, ana, space_id)
+
+    response = client.post(f"/invitations/{code}/redeem", headers=bea)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": space_id, "name": "Casa"}
+    assert space_names(client, bea) == ["Personal", "Casa"]
+    row = invitation(engine, code)
+    assert row.used_at is not None
+    assert row.used_by == client.get("/me", headers=bea).json()["id"]
+
+
+def test_space_code_cannot_be_redeemed_twice(client: TestClient, login: Login) -> None:
+    # Criterio de validación 5.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    carla = login("carla@example.com")
+    space_id = create_space(client, ana, "Casa")
+    code = issue_space_invitation(client, ana, space_id)
+    client.post(f"/invitations/{code}/redeem", headers=bea)
+
+    response = client.post(f"/invitations/{code}/redeem", headers=carla)
+
+    assert response.status_code == 403
+    assert space_names(client, carla) == ["Personal"]
+
+
+def test_existing_member_is_rejected_and_code_stays_unused(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Casa")
+    code = issue_space_invitation(client, ana, space_id)
+
+    response = client.post(f"/invitations/{code}/redeem", headers=ana)
+
+    assert response.status_code == 409
+    assert invitation(engine, code).used_at is None
+    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 200
+
+
+def test_expired_space_code_is_rejected(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    with Session(engine) as db:
+        db.execute(
+            update(Invitation).values(
+                expires_at=datetime.now(UTC) - timedelta(seconds=1)
+            )
+        )
+        db.commit()
+
+    response = client.post(f"/invitations/{code}/redeem", headers=bea)
+
+    assert response.status_code == 403
+    assert space_names(client, bea) == ["Personal"]
+
+
+def test_unknown_code_cannot_be_redeemed(client: TestClient, login: Login) -> None:
+    response = client.post("/invitations/codigo-inventado/redeem", headers=login())
+
+    assert response.status_code == 403
+
+
+def test_instance_code_cannot_be_redeemed_and_stays_unused(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    code = issue_instance_invitation(client, ana)
+
+    response = client.post(f"/invitations/{code}/redeem", headers=bea)
+
+    assert response.status_code == 403
+    assert invitation(engine, code).used_at is None
+
+
+def test_redeeming_requires_a_session(client: TestClient, login: Login) -> None:
+    ana = login()
+    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+
+    assert client.post(f"/invitations/{code}/redeem").status_code == 401
+
+
+def test_registering_with_space_code_creates_user_personal_space_and_membership(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana = login("ana@example.com")
+    space_id = create_space(client, ana, "Casa")
+    code = issue_space_invitation(client, ana, space_id)
+
+    response = register(client, "bea@example.com", code)
+
+    assert response.status_code == 201
+    bea = response.json()
+    with Session(engine) as db:
+        spaces = db.scalars(
+            select(Membership.space_id).where(Membership.user_id == bea["id"])
+        ).all()
+    assert set(spaces) == {bea["personal_space"]["id"], space_id}
+    assert invitation(engine, code).used_by == bea["id"]
+
+
+def test_shared_space_fixture_has_two_members(
+    client: TestClient, shared_space: tuple[int, dict[str, str], dict[str, str]]
+) -> None:
+    space_id, ana, bea = shared_space
+
+    assert (
+        space_names(client, ana)
+        == space_names(client, bea)
+        == [
+            "Personal",
+            "Casa",
+        ]
+    )
