@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Base, Invitation, Membership, Space, User
 from app.security import verify_password
+from tests.conftest import token_from
 
 PASSWORD = "una-contraseña-larga"
 
@@ -92,9 +93,9 @@ def test_invitation_code_in_the_body_joins_no_space_and_stays_unused(
     # código y la invitación sigue disponible para el canje (RF-17).
     ana = login("ana@example.com")
     space_id = client.post("/spaces", json={"name": "Casa"}, headers=ana).json()["id"]
-    code = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["code"]
+    url = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["url"]
 
-    response = register(client, "bea@example.com", invitation_code=code)
+    response = register(client, "bea@example.com", invitation_code=token_from(url))
 
     assert response.status_code == 201
     bea = response.json()

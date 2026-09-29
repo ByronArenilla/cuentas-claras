@@ -1,14 +1,18 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session
 
+from app.config import load_settings
 from app.main import app
 from app.models import Invitation, User
+from app.routers import invitations
 from app.routers.invitations import claim_invitation, find_valid_invitation
 from app.security import hash_token
+from tests.conftest import WEB_BASE_URL, token_from
 
 Login = Callable[..., dict[str, str]]
 
@@ -25,7 +29,7 @@ def issue_space_invitation(
 ) -> str:
     response = client.post(f"/spaces/{space_id}/invitations", headers=headers)
     assert response.status_code == 201
-    return response.json()["code"]
+    return token_from(response.json()["url"])
 
 
 def create_space(client: TestClient, headers: dict[str, str], name: str) -> int:
@@ -83,6 +87,45 @@ def test_space_invitation_is_stored_hashed_and_lasts_a_day(
     assert (row.space_id, row.used_at) == (space_id, None)
     expected = datetime.now(UTC) + timedelta(hours=24)
     assert abs(row.expires_at - expected) < timedelta(minutes=1)
+
+
+def test_sharing_returns_a_link_to_the_web(client: TestClient, login: Login) -> None:
+    # RF-15: la API devuelve el enlace completo; el token solo viaja dentro.
+    ana = login("ana@example.com")
+    space_id = create_space(client, ana, "Casa")
+
+    response = client.post(f"/spaces/{space_id}/invitations", headers=ana)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body) == {"url", "expires_at"}
+    assert body["url"].startswith(f"{WEB_BASE_URL}/unirse/")
+    assert token_from(body["url"])
+
+
+def test_shared_links_do_not_repeat(client: TestClient, login: Login) -> None:
+    ana = login("ana@example.com")
+    space_id = create_space(client, ana, "Casa")
+
+    tokens = {issue_space_invitation(client, ana, space_id) for _ in range(5)}
+
+    assert len(tokens) == 5
+
+
+def test_trailing_slash_in_web_base_url_does_not_double_it(
+    client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured = load_settings(
+        {"DATABASE_URL": "sqlite://", "TZ": "UTC", "WEB_BASE_URL": f"{WEB_BASE_URL}/"}
+    )
+    monkeypatch.setattr(invitations, "settings", configured)
+    ana = login("ana@example.com")
+    space_id = create_space(client, ana, "Casa")
+
+    url = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["url"]
+
+    assert url.startswith(f"{WEB_BASE_URL}/unirse/")
+    assert "//unirse" not in url
 
 
 def test_non_member_cannot_issue_space_invitations(

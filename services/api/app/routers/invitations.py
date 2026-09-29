@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
 from app.deps import current_user
 from app.models import Invitation, Membership, Space, User
@@ -54,7 +55,7 @@ def claim_invitation(db: Session, invitation: Invitation, user_id: int) -> bool:
 
 
 def issue_invitation(db: Session, created_by: int, space_id: int) -> InvitationOut:
-    """Guarda una invitación nueva y devuelve su código, que no se vuelve a ver."""
+    """Guarda una invitación nueva y devuelve su enlace, que no se vuelve a ver."""
     code = generate_invitation_code()
     invitation = Invitation(
         code_hash=hash_token(code),
@@ -64,7 +65,10 @@ def issue_invitation(db: Session, created_by: int, space_id: int) -> InvitationO
     )
     db.add(invitation)
     db.commit()
-    return InvitationOut(code=code, expires_at=invitation.expires_at)
+    return InvitationOut(
+        url=f"{settings.web_base_url}/unirse/{code}",
+        expires_at=invitation.expires_at,
+    )
 
 
 @router.post("/{code}/redeem")

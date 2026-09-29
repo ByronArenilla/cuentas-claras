@@ -171,7 +171,7 @@ de desarrollo se recrea, con aprobación previa (nota del ADR 0004).
   datos recreada.
 - RF: RF-15 (RF-16 retirado).
 
-## [ ] T15 — `WEB_BASE_URL` y el enlace completo
+## [x] T15 — `WEB_BASE_URL` y el enlace completo
 `config.py` exige `WEB_BASE_URL` y le quita la `/` final;
 `POST /spaces/{id}/invitations` responde `url` y `expires_at` en lugar de
 `code`. Se añade la variable a `.env.example` y a `tests/conftest.py`.

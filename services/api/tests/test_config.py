@@ -6,7 +6,11 @@ import pytest
 
 from app.config import MissingSettingError, Settings, load_settings
 
-VALID_ENV = {"DATABASE_URL": "sqlite://", "TZ": "America/Bogota"}
+VALID_ENV = {
+    "DATABASE_URL": "sqlite://",
+    "TZ": "America/Bogota",
+    "WEB_BASE_URL": "http://localhost:8080",
+}
 
 
 def import_config_with(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -21,7 +25,8 @@ def import_config_with(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 def test_import_fails_without_database_url() -> None:
-    result = import_config_with({"TZ": "America/Bogota"})
+    env = {key: value for key, value in VALID_ENV.items() if key != "DATABASE_URL"}
+    result = import_config_with(env)
 
     assert result.returncode != 0
     assert "DATABASE_URL" in result.stderr
@@ -33,7 +38,7 @@ def test_import_succeeds_with_required_variables() -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("missing", ["DATABASE_URL", "TZ"])
+@pytest.mark.parametrize("missing", ["DATABASE_URL", "TZ", "WEB_BASE_URL"])
 def test_missing_variable_is_named(missing: str) -> None:
     env = {key: value for key, value in VALID_ENV.items() if key != missing}
 
@@ -47,6 +52,7 @@ def test_all_missing_variables_are_named() -> None:
 
     assert "DATABASE_URL" in str(error.value)
     assert "TZ" in str(error.value)
+    assert "WEB_BASE_URL" in str(error.value)
 
 
 @pytest.mark.parametrize("value", ["", "   "])
@@ -58,4 +64,16 @@ def test_empty_value_counts_as_missing(value: str) -> None:
 def test_settings_are_read_from_environment() -> None:
     settings = load_settings(VALID_ENV)
 
-    assert settings == Settings(database_url="sqlite://", tz="America/Bogota")
+    assert settings == Settings(
+        database_url="sqlite://",
+        tz="America/Bogota",
+        web_base_url="http://localhost:8080",
+    )
+
+
+@pytest.mark.parametrize("value", ["http://localhost:8080/", "http://localhost:8080//"])
+def test_trailing_slash_is_removed_from_web_base_url(value: str) -> None:
+    # Sin esto, el enlace de invitación saldría con `//unirse` (RF-15).
+    settings = load_settings({**VALID_ENV, "WEB_BASE_URL": value})
+
+    assert settings.web_base_url == "http://localhost:8080"
