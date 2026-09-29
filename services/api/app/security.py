@@ -1,4 +1,4 @@
-"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15, RF-16).
+"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15).
 
 Contraseñas y tokens se tratan distinto a propósito. Una contraseña la elige
 una persona y se puede adivinar: necesita un hash lento y con sal (Argon2id).

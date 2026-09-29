@@ -3,7 +3,6 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    CheckConstraint,
     DateTime,
     ForeignKey,
     String,
@@ -77,24 +76,16 @@ class Membership(Base):
 
 
 class Invitation(Base):
+    """Invitación a un espacio, de un solo uso (RF-15). Desde el ADR 0005 no
+    hay invitación de instancia, así que toda invitación tiene espacio."""
+
     __tablename__ = "invitations"
-    # Solo la invitación de espacio apunta a un espacio (RF-15, RF-16).
-    __table_args__ = (
-        CheckConstraint(
-            "(kind = 'instance' AND space_id IS NULL)"
-            " OR (kind = 'space' AND space_id IS NOT NULL)",
-            name="invitation_kind_matches_space",
-        ),
-    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # Se guarda el hash y no el código: una copia de la base de datos no
     # entrega invitaciones utilizables.
     code_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    kind: Mapped[str] = mapped_column(String(10))
-    space_id: Mapped[int | None] = mapped_column(
-        ForeignKey("spaces.id", ondelete="CASCADE")
-    )
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session
 
+from app.main import app
 from app.models import Invitation, User
 from app.routers.invitations import claim_invitation, find_valid_invitation
 from app.security import hash_token
@@ -12,69 +13,11 @@ from app.security import hash_token
 Login = Callable[..., dict[str, str]]
 
 
-def issue_instance_invitation(client: TestClient, headers: dict[str, str]) -> str:
-    response = client.post("/invitations/instance", headers=headers)
-    assert response.status_code == 201
-    return response.json()["code"]
-
-
 def invitation(engine: Engine, code: str) -> Invitation:
     with Session(engine) as db:
         return db.scalars(
             select(Invitation).where(Invitation.code_hash == hash_token(code))
         ).one()
-
-
-# --- Emitir la invitación de instancia (RF-16) ---
-
-
-def test_instance_invitation_requires_a_session(client: TestClient) -> None:
-    assert client.post("/invitations/instance").status_code == 401
-
-
-def test_instance_invitation_is_stored_hashed_and_lasts_a_day(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    ana = login("ana@example.com")
-
-    response = client.post("/invitations/instance", headers=ana)
-
-    code = response.json()["code"]
-    row = invitation(engine, code)
-    assert row.code_hash != code
-    assert (row.kind, row.space_id, row.used_at) == ("instance", None, None)
-    expected = datetime.now(UTC) + timedelta(hours=24)
-    assert abs(row.expires_at - expected) < timedelta(minutes=1)
-
-
-def test_instance_invitation_codes_do_not_repeat(
-    client: TestClient, login: Login
-) -> None:
-    ana = login("ana@example.com")
-
-    codes = {issue_instance_invitation(client, ana) for _ in range(5)}
-
-    assert len(codes) == 5
-
-
-# --- Marca atómica del código (RF-19) ---
-
-
-def test_a_code_can_only_be_claimed_once(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    # Simula dos registros simultáneos: ambos vieron el código vigente y los
-    # dos intentan marcarlo; la segunda marca no debe afectar a ninguna fila.
-    code = issue_instance_invitation(client, login("ana@example.com"))
-    with Session(engine) as db:
-        row = find_valid_invitation(db, code)
-        ana_id = db.scalars(select(User.id)).one()
-
-        assert claim_invitation(db, row, ana_id) is True
-        assert claim_invitation(db, row, ana_id) is False
-
-
-# --- Invitación de espacio (RF-15, RF-17, RF-19, RF-20) ---
 
 
 def issue_space_invitation(
@@ -93,6 +36,40 @@ def space_names(client: TestClient, headers: dict[str, str]) -> list[str]:
     return [space["name"] for space in client.get("/spaces", headers=headers).json()]
 
 
+# --- Sin invitación de instancia (RF-16 retirado) ---
+
+
+def test_instance_invitation_route_no_longer_exists() -> None:
+    # Se comprueban las rutas publicadas y no un código HTTP: cuando exista
+    # `GET /invitations/{token}` (T16), un POST aquí respondería 405 y no 404.
+    # `app.routes` no sirve: agrupa cada router incluido en una sola entrada.
+    paths = app.openapi()["paths"]
+
+    assert "/invitations/{code}/redeem" in paths, "el test no ve las rutas"
+    assert "/invitations/instance" not in paths
+
+
+# --- Marca atómica del código (RF-19) ---
+
+
+def test_a_code_can_only_be_claimed_once(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # Simula dos canjes simultáneos: ambos vieron el código vigente y los
+    # dos intentan marcarlo; la segunda marca no debe afectar a ninguna fila.
+    ana = login("ana@example.com")
+    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    with Session(engine) as db:
+        row = find_valid_invitation(db, code)
+        ana_id = db.scalars(select(User.id)).one()
+
+        assert claim_invitation(db, row, ana_id) is True
+        assert claim_invitation(db, row, ana_id) is False
+
+
+# --- Invitación de espacio (RF-15, RF-17, RF-19, RF-20) ---
+
+
 def test_space_invitation_is_stored_hashed_and_lasts_a_day(
     client: TestClient, engine: Engine, login: Login
 ) -> None:
@@ -103,7 +80,7 @@ def test_space_invitation_is_stored_hashed_and_lasts_a_day(
 
     row = invitation(engine, code)
     assert row.code_hash != code
-    assert (row.kind, row.space_id, row.used_at) == ("space", space_id, None)
+    assert (row.space_id, row.used_at) == (space_id, None)
     expected = datetime.now(UTC) + timedelta(hours=24)
     assert abs(row.expires_at - expected) < timedelta(minutes=1)
 
@@ -119,8 +96,7 @@ def test_non_member_cannot_issue_space_invitations(
     # 404 como un espacio inexistente: Bea no sabe que "Casa" existe (RF-30).
     assert response.status_code == 404
     with Session(engine) as db:
-        space_invitations = select(func.count()).where(Invitation.kind == "space")
-        assert db.scalar(space_invitations) == 0
+        assert db.scalar(select(func.count()).select_from(Invitation)) == 0
 
 
 def test_issuing_space_invitations_requires_a_session(
@@ -200,18 +176,6 @@ def test_unknown_code_cannot_be_redeemed(client: TestClient, login: Login) -> No
     response = client.post("/invitations/codigo-inventado/redeem", headers=login())
 
     assert response.status_code == 403
-
-
-def test_instance_code_cannot_be_redeemed_and_stays_unused(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    ana, bea = login("ana@example.com"), login("bea@example.com")
-    code = issue_instance_invitation(client, ana)
-
-    response = client.post(f"/invitations/{code}/redeem", headers=bea)
-
-    assert response.status_code == 403
-    assert invitation(engine, code).used_at is None
 
 
 def test_redeeming_requires_a_session(client: TestClient, login: Login) -> None:

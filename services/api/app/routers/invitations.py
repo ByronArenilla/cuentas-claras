@@ -1,4 +1,7 @@
-"""Invitaciones: códigos de un solo uso con caducidad de 24 horas (RF-15 a RF-20)."""
+"""Invitaciones a un espacio: de un solo uso y con caducidad de 24 horas.
+
+Cubre RF-15, RF-17, RF-19 y RF-20.
+"""
 
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
@@ -50,14 +53,11 @@ def claim_invitation(db: Session, invitation: Invitation, user_id: int) -> bool:
     return result.rowcount == 1
 
 
-def issue_invitation(
-    db: Session, created_by: int, kind: str, space_id: int | None = None
-) -> InvitationOut:
+def issue_invitation(db: Session, created_by: int, space_id: int) -> InvitationOut:
     """Guarda una invitación nueva y devuelve su código, que no se vuelve a ver."""
     code = generate_invitation_code()
     invitation = Invitation(
         code_hash=hash_token(code),
-        kind=kind,
         space_id=space_id,
         created_by=created_by,
         expires_at=datetime.now(UTC) + INVITATION_LIFETIME,
@@ -65,15 +65,6 @@ def issue_invitation(
     db.add(invitation)
     db.commit()
     return InvitationOut(code=code, expires_at=invitation.expires_at)
-
-
-@router.post("/instance", status_code=status.HTTP_201_CREATED)
-def create_instance_invitation(
-    user: Annotated[User, Depends(current_user)],
-    db: Annotated[Session, Depends(get_db)],
-) -> InvitationOut:
-    """Código para crear una cuenta sin unirse a ningún espacio (RF-16)."""
-    return issue_invitation(db, user.id, "instance")
 
 
 @router.post("/{code}/redeem")
@@ -84,9 +75,7 @@ def redeem_invitation(
 ) -> SpaceOut:
     """Une a quien llama al espacio de la invitación y la marca usada (RF-17)."""
     invitation = find_valid_invitation(db, code)
-    # Una invitación de instancia solo sirve para crear cuenta: aquí cuenta
-    # como no válida y no se consume.
-    if invitation is None or invitation.kind != "space":
+    if invitation is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, INVITATION_INVALID)
 
     # RF-20: quien ya es miembro no duplica la membresía ni gasta el código.

@@ -157,14 +157,15 @@ unía a un espacio al registrarse.
   `invitations.py`.
 - RF: RF-1, RF-3, RF-4, RF-19.
 
-## [ ] T14 — Retirar la invitación de instancia
+## [x] T14 — Retirar la invitación de instancia
 Se quitan `POST /invitations/instance`, la columna `kind` y su
 `CheckConstraint`; `space_id` pasa a ser obligatorio. La base de datos local
 de desarrollo se recrea, con aprobación previa (nota del ADR 0004).
 
-- Test primero: `POST /invitations/instance` responde `404`, porque la
-  ruta ya no existe; guardar una invitación sin `space_id` falla en la base
-  de datos.
+- Test primero: `/invitations/instance` ya no aparece entre las rutas
+  publicadas (esquema OpenAPI); guardar una invitación sin `space_id` falla
+  en la base de datos. No se prueba con un `404`: cuando T16 añada
+  `GET /invitations/{token}`, un `POST` a esa ruta respondería `405`.
 - Hecho cuando: los tests pasan, no queda ninguna referencia a `instance`
   ni a `kind` en `services/api` y `make run-api` arranca con la base de
   datos recreada.

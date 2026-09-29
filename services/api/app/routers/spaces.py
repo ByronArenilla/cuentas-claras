@@ -77,7 +77,7 @@ def create_space_invitation(
     db: Annotated[Session, Depends(get_db)],
 ) -> InvitationOut:
     """Código para unirse a este espacio; solo lo emite un miembro (RF-15)."""
-    return issue_invitation(db, user.id, "space", space.id)
+    return issue_invitation(db, user.id, space.id)
 
 
 @router.delete("/{space_id}/members/me", status_code=status.HTTP_204_NO_CONTENT)
