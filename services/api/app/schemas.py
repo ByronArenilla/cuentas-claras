@@ -37,9 +37,6 @@ def normalize_email(value: str) -> str:
 class RegisterIn(BaseModel):
     email: str
     password: str
-    # Obligatorio en cuanto existe algún usuario (RF-2); lo exige la ruta,
-    # porque depende del estado de la base de datos y no solo de la entrada.
-    invitation_code: str | None = None
 
     @field_validator("email")
     @classmethod

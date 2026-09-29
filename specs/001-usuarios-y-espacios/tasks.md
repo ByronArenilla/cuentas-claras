@@ -142,7 +142,7 @@ actualización del `README.md` y del `docs/roadmap.md`.
 
 ## Cambios del ADR 0005 — Registro abierto e invitación por enlace
 
-## [ ] T13 — Registro abierto
+## [x] T13 — Registro abierto
 `POST /auth/register` deja de exigir y de aceptar invitaciones: se quitan la
 regla del primer usuario, `invitation_code` de `RegisterIn` y la rama que
 unía a un espacio al registrarse.

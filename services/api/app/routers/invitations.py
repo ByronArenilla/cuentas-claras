@@ -39,7 +39,7 @@ def claim_invitation(db: Session, invitation: Invitation, user_id: int) -> bool:
     """Marca la invitación como usada; False si otra petición la usó antes.
 
     El `WHERE used_at IS NULL` hace que la comprobación y la marca sean una
-    sola sentencia: si dos registros llegan a la vez con el mismo código,
+    sola sentencia: si dos canjes llegan a la vez con el mismo código,
     solo uno actualiza la fila y el otro recibe False (RF-19).
     """
     result = db.execute(

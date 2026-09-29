@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Base, Membership, Space, User
+from app.models import Base, Invitation, Membership, Space, User
 from app.security import verify_password
 
 PASSWORD = "una-contraseña-larga"
@@ -25,7 +25,7 @@ def row_counts(engine: Engine) -> tuple[int, int, int]:
     return count(engine, User), count(engine, Space), count(engine, Membership)
 
 
-def test_first_registration_creates_user_space_and_membership(
+def test_registration_creates_user_space_and_membership(
     client: TestClient, engine: Engine
 ) -> None:
     response = register(client)
@@ -68,14 +68,52 @@ def test_email_is_normalized_to_lowercase(client: TestClient) -> None:
     assert response.json()["email"] == "ana@example.com"
 
 
+def test_anyone_can_register_after_other_users_exist(
+    client: TestClient, engine: Engine, login: Callable[[str], dict[str, str]]
+) -> None:
+    # RF-1: el registro es abierto, sin la excepción del primer usuario.
+    login("ana@example.com")
+
+    response = register(client, "bea@example.com")
+
+    assert response.status_code == 201
+    bea = response.json()
+    with Session(engine) as db:
+        spaces = db.scalars(
+            select(Membership.space_id).where(Membership.user_id == bea["id"])
+        ).all()
+    assert spaces == [bea["personal_space"]["id"]]
+
+
+def test_invitation_code_in_the_body_joins_no_space_and_stays_unused(
+    client: TestClient, engine: Engine, login: Callable[[str], dict[str, str]]
+) -> None:
+    # Decisión 9: registrarse y unirse son dos pasos; el registro ignora el
+    # código y la invitación sigue disponible para el canje (RF-17).
+    ana = login("ana@example.com")
+    space_id = client.post("/spaces", json={"name": "Casa"}, headers=ana).json()["id"]
+    code = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["code"]
+
+    response = register(client, "bea@example.com", invitation_code=code)
+
+    assert response.status_code == 201
+    bea = response.json()
+    with Session(engine) as db:
+        spaces = db.scalars(
+            select(Membership.space_id).where(Membership.user_id == bea["id"])
+        ).all()
+        used_at = db.scalars(select(Invitation.used_at)).one()
+    assert spaces == [bea["personal_space"]["id"]]
+    assert used_at is None
+
+
 def test_repeated_email_is_rejected_and_nothing_is_created(
     client: TestClient, engine: Engine, login: Callable[[str], dict[str, str]]
 ) -> None:
-    ana = login("ana@example.com")
-    code = client.post("/invitations/instance", headers=ana).json()["code"]
+    login("ana@example.com")
     before = row_counts(engine)
 
-    response = register(client, "ANA@example.com", invitation_code=code)
+    response = register(client, "ANA@example.com")
 
     assert response.status_code == 409
     assert "correo" in response.json()["detail"]
