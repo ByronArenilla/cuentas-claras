@@ -64,6 +64,9 @@ spec debería crearse.
 - Tests de cada servicio en su carpeta `tests/`.
 - Commits con Conventional Commits y número de spec:
   `feat(api): registrar gasto [001]`.
+- Commits y PR van solo a mi nombre: sin `Co-Authored-By` ni ninguna otra
+  atribución a un agente de IA. En Claude Code lo aplica
+  `.claude/settings.json`.
 - Una rama por spec (`NNN-nombre`); se integra a `main` mediante PR.
 
 ## Flujo SDD
