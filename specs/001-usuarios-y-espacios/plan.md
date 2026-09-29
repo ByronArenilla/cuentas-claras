@@ -3,6 +3,8 @@
 - Spec: `spec.md` (estado: aprobada)
 - Servicio afectado: `services/api`
 - Estado: aprobado
+- Cambios: ADR 0005 — registro abierto e invitación por enlace (2026-09-29).
+  Las secciones afectadas lo citan.
 
 Esta es la primera spec que produce código, así que el plan incluye también
 el esqueleto del proyecto y el `Makefile` de la raíz, que todavía no existen.
@@ -13,8 +15,9 @@ el esqueleto del proyecto y el `Makefile` de la raíz, que todavía no existen.
 |---|---|---|
 | Hash de contraseñas | `argon2-cffi` (Argon2id) | Primera recomendación de OWASP; genera la sal sola y guarda los parámetros dentro del hash. |
 | Credencial de sesión | Token opaco aleatorio | La fila de la sesión se consulta igual en cada petición, así que firmar no añade nada (ver nota del ADR 0001). |
-| Esquema de base de datos | `create_all` de SQLAlchemy | No hay datos reales todavía y ninguna tabla cambia de forma. Alembic entrará cuando aparezca la primera migración que altere una tabla. |
+| Esquema de base de datos | `create_all` de SQLAlchemy | No hay datos reales todavía y ninguna tabla de `main` cambia de forma. Alembic entrará cuando aparezca la primera migración que altere una tabla (ADR 0004 y su nota del 2026-09-29). |
 | Validación del correo | Comprobación mínima propia | Evita añadir `email-validator` solo para esto. |
+| Enlace de invitación | La API lo arma con `WEB_BASE_URL` + `/unirse/` + token | La web y el bot comparten el mismo enlace sin duplicar la ruta (ADR 0005). |
 
 ## Dependencias
 
@@ -46,7 +49,7 @@ implementación exige volver a este plan.
         routers/
           auth.py                 registro, login, logout, /me
           spaces.py               crear, listar, salir, borrar
-          invitations.py          emitir y canjear
+          invitations.py          emitir, consultar y canjear
       tests/
         conftest.py               base de datos en memoria y cliente
         test_auth.py
@@ -68,10 +71,11 @@ Todas las fechas se guardan en UTC (principio 7).
 código: aunque dos peticiones lleguen a la vez, la base de datos impide la
 membresía duplicada.
 
-**`invitations`** — `id`, `code_hash`, `kind` (`instance` | `space`),
-`space_id` (nulo cuando `kind` es `instance`), `created_by`, `expires_at`,
-`used_at`, `used_by`. Guardar el hash y no el código evita que una copia de
-la base de datos entregue invitaciones utilizables. [RF-15, RF-16, RF-19]
+**`invitations`** — `id`, `code_hash`, `space_id` (obligatorio), `created_by`,
+`expires_at`, `used_at`, `used_by`. Guardar el hash y no el token evita que
+una copia de la base de datos entregue invitaciones utilizables. Desde el
+ADR 0005 ya no hay columna `kind` ni la restricción que la acompañaba: toda
+invitación es de espacio. [RF-15, RF-19]
 
 **`sessions`** — `id`, `token_hash`, `user_id`, `expires_at`, `created_at`.
 [RF-8, RF-10, RF-12]
@@ -83,7 +87,11 @@ Notas de implementación:
   foráneas si no se activan explícitamente** (`PRAGMA foreign_keys=ON` en
   cada conexión); sin eso las reglas quedan decorativas. [RF-23, RF-27]
 - Crear usuario + espacio personal + membresía ocurre en una sola
-  transacción: o se crea todo, o no se crea nada. [RF-3, RF-18]
+  transacción: o se crea todo, o no se crea nada. [RF-3]
+- La base de datos de desarrollo (`services/api/budget.db`) se creó con la
+  columna `kind`, y `create_all` no la quita. Al aplicar el ADR 0005 se
+  borra y se recrea al arrancar; como es borrar datos, se pide aprobación
+  antes (nota del 2026-09-29 en el ADR 0004).
 
 ## Seguridad
 
@@ -97,7 +105,15 @@ sesión y `secrets.token_urlsafe(16)` para la invitación; en la base de datos
 se guarda `sha256` del valor. Aquí SHA-256 es suficiente y Argon2 sería un
 error de diseño: un hash lento protege secretos *adivinables* como una
 contraseña, y estos tokens son aleatorios de 128 bits o más, imposibles de
-adivinar por fuerza bruta. [RF-8, RF-15, RF-16]
+adivinar por fuerza bruta. [RF-8, RF-15]
+
+**Enlace de invitación** (ADR 0005): la respuesta de
+`POST /spaces/{id}/invitations` trae `url` (`<WEB_BASE_URL>/unirse/<token>`)
+y `expires_at`. El token en claro solo existe dentro de esa URL. La consulta
+pública `GET /invitations/{token}` devuelve únicamente el nombre del espacio
+y la caducidad: ni el `id` del espacio, ni sus miembros, ni quién invitó.
+Consultar nunca escribe en la base de datos; unirse sigue siendo
+`POST /invitations/{token}/redeem` con sesión. [RF-36, RF-37]
 
 **Aislamiento**: dos dependencias de FastAPI, y toda ruta protegida usa una
 de las dos.
@@ -116,7 +132,7 @@ alguien la salta una sola vez, el aislamiento se rompe ahí. [RF-32]
 
 | Método y ruta | Qué hace | RF |
 |---|---|---|
-| `POST /auth/register` | Crea usuario, espacio personal y, si vino con invitación de espacio, la membresía | RF-1 a RF-5, RF-18, RF-19 |
+| `POST /auth/register` | Crea usuario y espacio personal, sin código | RF-1, RF-3 a RF-5 |
 | `POST /auth/login` | Crea la sesión y devuelve el token | RF-8, RF-9 |
 | `POST /auth/logout` | Borra la sesión actual | RF-12 |
 | `GET /me` | Quién soy (lo usará la web) | RF-10 |
@@ -124,9 +140,9 @@ alguien la salta una sola vez, el aislamiento se rompe ahí. [RF-32]
 | `POST /spaces` | Crea un espacio y me deja como miembro | RF-13 |
 | `DELETE /spaces/{id}?confirm=<nombre>` | Borra el espacio | RF-23 a RF-27 |
 | `DELETE /spaces/{id}/members/me` | Salir del espacio | RF-21, RF-22 |
-| `POST /spaces/{id}/invitations` | Invitación a ese espacio | RF-15 |
-| `POST /invitations/instance` | Invitación solo para crear cuenta | RF-16 |
-| `POST /invitations/{code}/redeem` | Canjear estando ya registrado | RF-17, RF-19, RF-20 |
+| `POST /spaces/{id}/invitations` | Compartir: devuelve el enlace de invitación | RF-15 |
+| `GET /invitations/{token}` | Sin sesión: nombre del espacio y caducidad; `404` si no es válida | RF-19, RF-36, RF-37 |
+| `POST /invitations/{token}/redeem` | Unirse al espacio, con sesión | RF-17, RF-19, RF-20 |
 | `GET /health` | Sin autenticación, sin datos | RF-34 |
 
 El nombre de confirmación del borrado viaja como parámetro de consulta
@@ -138,10 +154,16 @@ la forma de cumplir RF-28 sin que la API recuerde nada entre peticiones.
 
 ## Configuración y arranque
 
-`config.py` lee el entorno una sola vez al importar. `DATABASE_URL` y `TZ`
-son obligatorias: si falta alguna, el proceso termina con un error que la
-nombra, en lugar de arrancar con un valor por defecto y fallar más tarde de
-forma confusa. [RF-33]
+`config.py` lee el entorno una sola vez al importar. `DATABASE_URL`, `TZ` y
+`WEB_BASE_URL` son obligatorias: si falta alguna, el proceso termina con un
+error que la nombra, en lugar de arrancar con un valor por defecto y fallar
+más tarde de forma confusa. [RF-33]
+
+`WEB_BASE_URL` es la URL pública de la web y cambia entre entornos
+(principio 11). En local vale `http://localhost:8080` de forma provisional:
+el puerto real lo fija `007-dashboard-web`, que crea la web. Se le quita
+la `/` final al leerla, para que el enlace no salga con `//unirse`. Entra en
+`.env.example` y en `tests/conftest.py`. [RF-15]
 
 ## Tests
 
@@ -164,18 +186,25 @@ dato observable; las specs 002 a 004 los ampliarán con gastos reales.
 - **Dónde guarda el token la web** (cookie `HttpOnly` o `localStorage`) se
   decide en `007-dashboard-web` y `008-control-acceso`. Este plan solo fija
   que la API lo acepta por la cabecera `Authorization`.
-- **No hay límite de intentos de inicio de sesión.** Con registro cerrado el
-  riesgo es menor, pero conviene anotarlo para `008-control-acceso`.
-- **El código de invitación viaja en la URL** de
-  `POST /invitations/{code}/redeem`, así que queda escrito en el log de
+- **No hay límite de peticiones al registro ni al inicio de sesión.** Con el
+  registro abierto (ADR 0005), cualquiera puede crear cuentas o probar
+  contraseñas. Lo resuelve el *rate limiting* de Nginx en
+  `010-reverse-proxy`.
+- **El token de invitación viaja en la URL**: en el enlace
+  `/unirse/<token>` de la web y en `GET /invitations/{token}` y
+  `POST /invitations/{token}/redeem` de la API. Queda escrito en el log de
   accesos de uvicorn y, desde la fase 3, en el de Nginx. Se acepta por ahora:
-  el código es de un solo uso y caduca en 24 horas, pero quien lea los logs
+  el token es de un solo uso y caduca en 24 horas, pero quien lea los logs
   podría canjear uno todavía sin usar. `010-reverse-proxy` debe decidir si
-  Nginx enmascara esa ruta en sus logs o si el código pasa al cuerpo de la
-  petición.
-- **RF-4 permite saber si un correo ya está registrado** a quien tenga una
-  invitación válida. Se acepta: el registro es cerrado y el mensaje claro
-  vale más que ocultar ese detalle a alguien ya invitado.
+  Nginx enmascara esas rutas en sus logs.
+- **RF-4 permite a cualquiera saber si un correo ya está registrado.** Antes
+  solo lo averiguaba quien tenía una invitación; con el registro abierto es
+  público. Se acepta, porque un mensaje claro vale más, y el límite de
+  peticiones de `010-reverse-proxy` impide recorrer listas de correos.
+- **`GET /invitations/{token}` responde `404` y el canje, `403`**, para el
+  mismo token no válido y con el mismo mensaje (RF-19). La consulta busca un
+  recurso que no existe; el canje es una acción que se rechaza. Se deja así
+  para no cambiar el contrato del canje que ya está probado.
 
 ## Conceptos nuevos
 
@@ -183,3 +212,4 @@ dato observable; las specs 002 a 004 los ampliarán con gastos reales.
 - [Dependencias en FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) — el mecanismo con el que `current_user` y `member_space` se aplican a cada ruta.
 - [Claves foráneas en SQLite](https://www.sqlite.org/foreignkeys.html#fk_enable) — por qué hay que activarlas en cada conexión.
 - [`secrets`](https://docs.python.org/3/library/secrets.html) — generación de tokens en Python.
+- [Capability URLs](https://www.w3.org/TR/capability-urls/) — W3C. Por qué un enlace puede ser el permiso, y cómo cuidarlo (ADR 0005).

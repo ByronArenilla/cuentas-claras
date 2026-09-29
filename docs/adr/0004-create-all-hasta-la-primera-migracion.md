@@ -54,3 +54,11 @@ sobre una migración inicial que coincida con el esquema actual).
   margen: tocar un modelo existente obliga a traer Alembic en esa misma spec.
 - Qué aprendí: posponer una herramienta es una decisión legítima si queda
   escrito cuándo deja de serlo.
+
+> Nota (2026-09-29): el ADR 0005 quita la columna `kind` de `invitations`
+> dentro de la misma spec 001 que creó la tabla. Aquí "tabla existente"
+> significa una tabla que ya está en `main` o en un entorno desplegado, que
+> es donde puede haber datos que proteger (principio 8). Una tabla que
+> cambia antes de integrarse en `main` no es todavía una migración: se
+> cambia el modelo y la base de datos local de desarrollo se recrea. La
+> condición de reemplazo sigue intacta para todo lo que ya esté en `main`.
