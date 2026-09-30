@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import load_settings
 from app.main import app
-from app.models import Invitation, User
+from app.models import Invitation, Membership, User
 from app.routers import invitations
 from app.routers.invitations import claim_invitation, find_valid_invitation
 from app.security import hash_token
@@ -241,3 +241,86 @@ def test_shared_space_fixture_has_two_members(
             "Casa",
         ]
     )
+
+
+# --- Consultar la invitación sin sesión (RF-19, RF-36, RF-37) ---
+
+
+def membership_count(engine: Engine) -> int:
+    with Session(engine) as db:
+        return db.scalar(select(func.count()).select_from(Membership))
+
+
+def test_previewing_shows_only_space_name_and_expiry(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-36: sin cabecera Authorization, y nada más que nombre y caducidad
+    # (ni id del espacio, ni miembros, ni quién invitó).
+    ana = login("ana@example.com")
+    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+
+    response = client.get(f"/invitations/{code}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"space_name", "expires_at"}
+    assert body["space_name"] == "Casa"
+    expires_at = datetime.fromisoformat(body["expires_at"])
+    assert expires_at == invitation(engine, code).expires_at
+
+
+def test_previewing_does_not_consume_the_invitation(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # Criterio de validación 5: consultar no gasta el enlace; canjear sí.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = create_space(client, ana, "Casa")
+    code = issue_space_invitation(client, ana, space_id)
+
+    assert client.get(f"/invitations/{code}").status_code == 200
+    assert client.get(f"/invitations/{code}").status_code == 200
+
+    row = invitation(engine, code)
+    assert (row.used_at, row.used_by) == (None, None)
+    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 200
+
+
+def test_previewing_never_creates_a_membership(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-37: ni siquiera con sesión iniciada; unirse exige el canje explícito.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    before = membership_count(engine)
+
+    client.get(f"/invitations/{code}")
+    client.get(f"/invitations/{code}", headers=bea)
+
+    assert membership_count(engine) == before
+    assert space_names(client, bea) == ["Personal"]
+
+
+def test_invalid_invitations_preview_as_404_with_the_same_message(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-19: desconocido, usado y caducado son indistinguibles.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    used = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    client.post(f"/invitations/{used}/redeem", headers=bea).raise_for_status()
+    expired = issue_space_invitation(client, ana, create_space(client, ana, "Viaje"))
+    with Session(engine) as db:
+        db.execute(
+            update(Invitation)
+            .where(Invitation.code_hash == hash_token(expired))
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        db.commit()
+
+    responses = [
+        client.get(f"/invitations/{code}")
+        for code in ("codigo-inventado", used, expired)
+    ]
+
+    assert [response.status_code for response in responses] == [404, 404, 404]
+    details = {response.json()["detail"] for response in responses}
+    assert details == {invitations.INVITATION_INVALID}

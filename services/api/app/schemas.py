@@ -98,6 +98,13 @@ class InvitationOut(BaseModel):
     expires_at: datetime
 
 
+class InvitationPreviewOut(BaseModel):
+    # Lo que ve cualquiera con el enlace, sin sesión (RF-36): ni el id del
+    # espacio, ni sus miembros, ni quién invitó.
+    space_name: str
+    expires_at: datetime
+
+
 class LoginIn(BaseModel):
     # Sin validar formato ni longitud: unas credenciales mal escritas se
     # rechazan con el mismo mensaje que unas equivocadas (RF-9).

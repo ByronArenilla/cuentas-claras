@@ -1,6 +1,6 @@
 """Invitaciones a un espacio: de un solo uso y con caducidad de 24 horas.
 
-Cubre RF-15, RF-17, RF-19 y RF-20.
+Cubre RF-15, RF-17, RF-19, RF-20, RF-36 y RF-37.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -15,7 +15,7 @@ from app.config import settings
 from app.db import get_db
 from app.deps import current_user
 from app.models import Invitation, Membership, Space, User
-from app.schemas import InvitationOut, SpaceOut
+from app.schemas import InvitationOut, InvitationPreviewOut, SpaceOut
 from app.security import generate_invitation_code, hash_token
 
 INVITATION_LIFETIME = timedelta(hours=24)
@@ -69,6 +69,24 @@ def issue_invitation(db: Session, created_by: int, space_id: int) -> InvitationO
         url=f"{settings.web_base_url}/unirse/{code}",
         expires_at=invitation.expires_at,
     )
+
+
+@router.get("/{code}")
+def preview_invitation(
+    code: str, db: Annotated[Session, Depends(get_db)]
+) -> InvitationPreviewOut:
+    """Nombre del espacio y caducidad de una invitación vigente (RF-36).
+
+    Sin sesión y sin escribir en la base de datos: las vistas previas de
+    Telegram o WhatsApp abren el enlace y no deben gastarlo ni unir a nadie
+    (RF-37). Una invitación no válida es un recurso que no existe: `404`,
+    con el mismo mensaje que el canje (RF-19).
+    """
+    invitation = find_valid_invitation(db, code)
+    if invitation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, INVITATION_INVALID)
+    space = db.get_one(Space, invitation.space_id)
+    return InvitationPreviewOut(space_name=space.name, expires_at=invitation.expires_at)
 
 
 @router.post("/{code}/redeem")

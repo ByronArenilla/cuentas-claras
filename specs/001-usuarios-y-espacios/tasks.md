@@ -184,7 +184,7 @@ de desarrollo se recrea, con aprobación previa (nota del ADR 0004).
   qué falta.
 - RF: RF-15, RF-33.
 
-## [ ] T16 — Consultar la invitación sin sesión
+## [x] T16 — Consultar la invitación sin sesión
 `GET /invitations/{token}`: nombre del espacio y caducidad, sin
 autenticación y sin escribir en la base de datos.
 
