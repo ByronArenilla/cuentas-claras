@@ -1,7 +1,7 @@
 # Roadmap — budget-ops
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 001-usuarios-y-espacios (reabierta por el ADR 0005)
+> **Spec activa:** 002-api-gastos
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -9,7 +9,7 @@ Cada fase introduce una herramienta. Una spec empieza cuando la anterior
 está validada. Marca con [x] las specs terminadas.
 
 ## Fase 1 — Aplicación y SDD
-- [ ] 001-usuarios-y-espacios — Usuarios, espacios y membresías; todo dato cuelga de un espacio.
+- [x] 001-usuarios-y-espacios — Usuarios, espacios y membresías; todo dato cuelga de un espacio.
 - [ ] 002-api-gastos — Registrar, listar, editar y borrar gastos.
 - [ ] 003-categorias — Categorías predefinidas y creación de nuevas.
 - [ ] 004-presupuesto-mensual — Presupuesto por categoría y mes; resumen gastado vs. presupuestado.
@@ -23,6 +23,12 @@ está validada. Marca con [x] las specs terminadas.
 
 ## Fase 3 — Nginx
 - [ ] 010-reverse-proxy
+  - Límite de peticiones (*rate limiting*) en `POST /auth/register` y
+    `POST /auth/login`: con el registro abierto, frena la creación masiva de
+    cuentas, la prueba de contraseñas y el recorrido de correos (ADR 0005).
+  - Enmascarar en los logs de acceso el token de invitación de
+    `/invitations/<token>` y `/unirse/<token>`: quien lea los logs no debe
+    poder canjear un enlace todavía sin usar (plan 001).
 
 ## Fase 4 — GitHub Actions
 - [ ] 011-integracion-continua

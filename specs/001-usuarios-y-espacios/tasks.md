@@ -197,7 +197,7 @@ autenticación y sin escribir en la base de datos.
 - Hecho cuando: los tests pasan, incluido el criterio 5 de la spec.
 - RF: RF-19, RF-36, RF-37.
 
-## [ ] T17 — Cierre del cambio: documentación
+## [x] T17 — Cierre del cambio: documentación
 `README.md`: el registro deja de pedir código y la tabla de invitaciones se
 sustituye por el flujo del enlace (compartir, consultar, canjear).
 `docs/roadmap.md`: anotar en `010-reverse-proxy` el límite de peticiones al

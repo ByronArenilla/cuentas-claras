@@ -24,15 +24,17 @@ make test             # tests
 make lint             # ruff check y ruff format --check
 ```
 
-Si falta `DATABASE_URL` o `TZ`, la API no arranca y dice cuál falta. La
-documentación interactiva de la API está en http://localhost:8000/docs.
+Si falta `DATABASE_URL`, `TZ` o `WEB_BASE_URL`, la API no arranca y dice
+cuál falta. La documentación interactiva de la API está en
+http://localhost:8000/docs.
 
 ## Usuarios, espacios e invitaciones
 Los datos pertenecen a un **espacio**, no a una persona. Cada usuario tiene
 un espacio "Personal" y puede crear otros o unirse a los de otras personas
 para compartir presupuesto. Dos espacios nunca ven los datos del otro.
 
-**Primer usuario.** Con la base de datos vacía, el registro no pide código:
+**Registrarse.** El registro es abierto: basta un correo y una contraseña de
+al menos 12 caracteres. Crea el usuario y su espacio "Personal".
 
 ```sh
 curl -X POST localhost:8000/auth/register -H 'content-type: application/json' \
@@ -48,14 +50,41 @@ curl -X POST localhost:8000/auth/login -H 'content-type: application/json' \
   -d '{"email": "ana@example.com", "password": "al-menos-12-caracteres"}'
 ```
 
-**Invitar.** A partir del primer usuario el registro es cerrado: hace falta
-un código de invitación, de un solo uso y válido durante 24 horas.
+**Compartir un espacio.** Se hace con un enlace de un solo uso que caduca a
+las 24 horas. Quien tiene el enlace puede unirse, así que conviene mandarlo
+solo a quien se invita.
 
-| Para… | Pide el código con | Y quien lo recibe… |
-|---|---|---|
-| Que alguien tenga su presupuesto independiente | `POST /invitations/instance` | se registra con `"invitation_code"` en el cuerpo |
-| Compartir un espacio con alguien sin cuenta | `POST /spaces/{id}/invitations` | se registra con `"invitation_code"` y entra ya en el espacio |
-| Compartir un espacio con alguien con cuenta | `POST /spaces/{id}/invitations` | lo canjea con `POST /invitations/{code}/redeem` |
+1. **Compartir.** Un miembro pide el enlace del espacio (su `id` sale de
+   `GET /spaces`):
+
+   ```sh
+   curl -X POST localhost:8000/spaces/2/invitations \
+     -H 'Authorization: Bearer <token de Ana>'
+   # {"url": "http://localhost:8080/unirse/<invitación>", "expires_at": "..."}
+   ```
+
+2. **Consultar.** Cualquiera con el enlace ve a qué espacio lo invitan, sin
+   sesión. Consultarlo no lo gasta ni une a nadie, así que las vistas
+   previas de Telegram o WhatsApp no lo estropean:
+
+   ```sh
+   curl localhost:8000/invitations/<invitación>
+   # {"space_name": "Casa", "expires_at": "..."}
+   ```
+
+3. **Canjear.** Quien recibe el enlace inicia sesión (o se registra primero
+   si no tiene cuenta) y se une con una petición explícita:
+
+   ```sh
+   curl -X POST localhost:8000/invitations/<invitación>/redeem \
+     -H 'Authorization: Bearer <token de Bea>'
+   # {"id": 2, "name": "Casa"}
+   ```
+
+Un enlace desconocido, usado o caducado se rechaza con el mismo mensaje. La
+página `/unirse/...` de la web llegará con `007-dashboard-web`; hasta
+entonces, `<invitación>` es la última parte de la `url` y el canje se hace
+contra la API.
 
 **Espacios.** `GET /spaces` lista los tuyos y `POST /spaces` crea uno.
 `DELETE /spaces/{id}/members/me` te saca de un espacio. Si eres su único
