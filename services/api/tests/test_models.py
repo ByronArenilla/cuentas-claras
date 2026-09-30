@@ -72,14 +72,12 @@ def test_email_is_unique(session: Session) -> None:
         make_user(session, "ana@example.com")
 
 
-def test_instance_invitation_cannot_point_to_a_space(session: Session) -> None:
+def test_invitation_without_a_space_is_rejected(session: Session) -> None:
+    # Desde el ADR 0005 toda invitación es de espacio (RF-15).
     user = make_user(session)
-    space = make_space(session)
     session.add(
         Invitation(
             code_hash="abc",
-            kind="instance",
-            space_id=space.id,
             created_by=user.id,
             expires_at=datetime.now(UTC) + timedelta(hours=24),
         )

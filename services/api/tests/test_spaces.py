@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.deps import member_space
 from app.models import Invitation, Membership, Space, User
 from app.security import hash_token
+from tests.conftest import token_from
 
 Login = Callable[..., dict[str, str]]
 
@@ -302,7 +303,7 @@ def test_deleting_a_space_leaves_the_user_and_other_spaces_intact(
     # Criterio de validación 6 (RF-27): Ana borra "Viajes" y nada más cambia.
     casa_id, ana, bea = shared_space
     viajes_id = create_space(client, ana, "Viajes")["id"]
-    casa_code = client.post(f"/spaces/{casa_id}/invitations", headers=ana).json()
+    casa_url = client.post(f"/spaces/{casa_id}/invitations", headers=ana).json()["url"]
 
     delete_space(client, ana, viajes_id, "Viajes")
 
@@ -314,7 +315,7 @@ def test_deleting_a_space_leaves_the_user_and_other_spaces_intact(
         ).all()
         casa_invitation = db.scalar(
             select(Invitation).where(
-                Invitation.code_hash == hash_token(casa_code["code"])
+                Invitation.code_hash == hash_token(token_from(casa_url))
             )
         )
     assert len(casa_members) == 2
@@ -326,11 +327,12 @@ def test_pending_invitations_die_with_the_space(
 ) -> None:
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = create_space(client, ana, "Viajes")["id"]
-    code = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["code"]
+    url = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["url"]
+    token = token_from(url)
 
     delete_space(client, ana, space_id, "Viajes")
 
-    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 403
+    assert client.post(f"/invitations/{token}/redeem", headers=bea).status_code == 403
     assert names(client, bea) == ["Personal"]
 
 

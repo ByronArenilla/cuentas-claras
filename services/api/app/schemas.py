@@ -37,9 +37,6 @@ def normalize_email(value: str) -> str:
 class RegisterIn(BaseModel):
     email: str
     password: str
-    # Obligatorio en cuanto existe algún usuario (RF-2); lo exige la ruta,
-    # porque depende del estado de la base de datos y no solo de la entrada.
-    invitation_code: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -94,9 +91,17 @@ class RegisterOut(BaseModel):
 
 
 class InvitationOut(BaseModel):
-    # El código en claro solo aparece en esta respuesta: la base de datos
-    # guarda su hash y no lo puede volver a mostrar.
-    code: str
+    # Enlace `<WEB_BASE_URL>/unirse/<token>` (RF-15). El token en claro solo
+    # aparece dentro de esta URL: la base de datos guarda su hash y no lo
+    # puede volver a mostrar.
+    url: str
+    expires_at: datetime
+
+
+class InvitationPreviewOut(BaseModel):
+    # Lo que ve cualquiera con el enlace, sin sesión (RF-36): ni el id del
+    # espacio, ni sus miembros, ni quién invitó.
+    space_name: str
     expires_at: datetime
 
 

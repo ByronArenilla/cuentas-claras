@@ -3,6 +3,7 @@
 - Fase: 1 — Aplicación y SDD
 - Estado: aprobada
 - Base: ADR 0001 — Multiusuario mediante espacios compartidos
+- Cambios: ADR 0005 — Registro abierto e invitación por enlace (2026-09-29)
 
 ## Por qué
 
@@ -20,8 +21,8 @@ Esta spec cubre dos necesidades reales:
 
 ## Qué entra
 
-La API gana usuarios, espacios, membresías, invitaciones, borrado de
-espacios y la sesión con la que se identifica a quien llama. Con eso, las
+La API gana usuarios, espacios, membresías, invitaciones por enlace,
+borrado de espacios y la sesión con la que se identifica a quien llama. Con eso, las
 specs siguientes pueden colgar sus datos de un espacio.
 
 ## Qué NO entra
@@ -42,20 +43,20 @@ specs siguientes pueden colgar sus datos de un espacio.
 - **Membresía** (`membership`): vincula un usuario con un espacio.
 - **Espacio personal**: el espacio que se crea junto con el usuario, para
   que pueda registrar gastos sin configurar nada.
-- **Invitación de instancia**: código de un solo uso que permite crear una
-  cuenta sin unirse a ningún espacio ajeno. Es la vía del usuario que quiere
-  su presupuesto independiente.
-- **Invitación de espacio**: código de un solo uso que convierte a quien lo
-  canjea en miembro de un espacio concreto.
+- **Invitación de espacio**: enlace de un solo uso que un miembro genera al
+  compartir un espacio y que convierte a quien lo canjea en miembro de ese
+  espacio. Tiene la forma `<WEB_BASE_URL>/unirse/<token>`: quien tiene el
+  enlace tiene el permiso de unirse.
 - **Sesión**: fila en la base de datos, con caducidad, que respalda el
   token que la API entrega al iniciar sesión. El token es aleatorio y la
   base de datos guarda solo su hash.
 
 ## Decisiones de clarificación (2026-09-22)
 
-1. **El registro exige código de invitación**, salvo el primer usuario de la
-   instancia, que no tiene quién se lo dé. Evita que una instancia expuesta
-   en internet acepte cuentas de desconocidos.
+1. ~~**El registro exige código de invitación**, salvo el primer usuario de
+   la instancia, que no tiene quién se lo dé. Evita que una instancia
+   expuesta en internet acepte cuentas de desconocidos.~~ Reemplazada por la
+   decisión 9.
 2. **El usuario se identifica por su correo**, no por un nombre de usuario.
 3. **La sesión dura 15 días y la invitación 24 horas.** La invitación viaja
    por mensajería y queda ahí guardada, así que caduca pronto.
@@ -77,20 +78,28 @@ specs siguientes pueden colgar sus datos de un espacio.
 8. **Nadie sale de su único espacio** (2026-09-24). Igual que RF-26 impide
    borrarlo, salir del último espacio que le queda a un usuario se rechaza:
    así nadie se queda sin sitio donde registrar gastos (RF-35).
+9. **El registro es abierto y los espacios se comparten con un enlace**
+   (2026-09-29, ADR 0005). Cualquiera crea una cuenta con correo y
+   contraseña; la invitación de instancia desaparece. Compartir un espacio
+   genera un enlace completo, de un solo uso y con caducidad de 24 horas.
+   Quien lo abre ve a qué espacio lo invitan sin iniciar sesión, pero unirse
+   exige sesión y una petición explícita: las vistas previas de Telegram o
+   WhatsApp abren el enlace y no deben gastarlo. Quien no tiene cuenta
+   primero se registra y después se une. El límite de peticiones contra el
+   abuso del registro abierto queda para `010-reverse-proxy`.
 
 ## Requisitos funcionales
 
 ### Registro
 
-- **RF-1** CUANDO no existe todavía ningún usuario y alguien se registra con
-  un correo y una contraseña válidos, el sistema DEBE crear el usuario sin
-  exigir código de invitación.
-- **RF-2** MIENTRAS exista al menos un usuario, el sistema DEBE exigir un
-  código de invitación vigente para registrar a alguien nuevo.
+- **RF-1** CUANDO alguien se registra con un correo y una contraseña
+  válidos, el sistema DEBE crear el usuario sin exigir código de invitación.
+- **RF-2** *(Retirado por la decisión 9: el registro ya no exige
+  invitación.)*
 - **RF-3** CUANDO se crea un usuario, el sistema DEBE crear en la misma
   operación su espacio personal, con esa persona como único miembro.
 - **RF-4** SI el correo ya pertenece a un usuario, ENTONCES el sistema DEBE
-  rechazar el registro, sin crear nada y sin consumir el código.
+  rechazar el registro sin crear nada.
 - **RF-5** SI la contraseña no alcanza la longitud mínima, ENTONCES el
   sistema DEBE rechazar el registro e indicar el requisito incumplido.
 - **RF-6** El sistema DEBE guardar las contraseñas con un algoritmo de hash
@@ -124,22 +133,28 @@ specs siguientes pueden colgar sus datos de un espacio.
   crearlo y dejarlo como miembro.
 - **RF-14** El sistema DEBE permitir a un usuario listar los espacios de los
   que es miembro.
-- **RF-15** CUANDO un miembro pide una invitación para su espacio, el
-  sistema DEBE emitir un código de un solo uso con caducidad de 24 horas.
-- **RF-16** CUANDO un usuario pide una invitación de instancia, el sistema
-  DEBE emitir un código de un solo uso con caducidad de 24 horas que permita
-  crear una cuenta sin unirse a ningún espacio ajeno.
+- **RF-15** CUANDO un miembro comparte su espacio, el sistema DEBE emitir un
+  enlace de invitación completo, formado por la URL pública de la web y un
+  token aleatorio, de un solo uso y con caducidad de 24 horas.
+- **RF-16** *(Retirado por la decisión 9: sin registro cerrado no hace falta
+  invitación de instancia.)*
 - **RF-17** CUANDO un usuario autenticado canjea una invitación de espacio
   vigente, el sistema DEBE crear su membresía en ese espacio y marcar la
   invitación como usada.
-- **RF-18** CUANDO alguien sin cuenta se registra con una invitación de
-  espacio vigente, el sistema DEBE crear en la misma operación el usuario,
-  su espacio personal y su membresía en el espacio invitado.
+- **RF-18** *(Retirado por la decisión 9: quien no tiene cuenta primero se
+  registra, RF-1, y después se une, RF-17.)*
 - **RF-19** SI una invitación no existe, ya se usó o caducó, ENTONCES el
-  sistema DEBE rechazar la operación sin crear usuario ni membresía.
+  sistema DEBE rechazar la operación sin crear ninguna membresía y con el
+  mismo mensaje en los tres casos.
 - **RF-20** SI quien canjea una invitación de espacio ya es miembro de ese
   espacio, ENTONCES el sistema DEBE rechazar el canje sin duplicar la
-  membresía y sin consumir el código.
+  membresía y sin consumir la invitación.
+- **RF-36** CUANDO alguien consulta una invitación vigente, el sistema DEBE
+  devolver el nombre del espacio y la caducidad de la invitación, sin exigir
+  sesión y sin consumirla.
+- **RF-37** El sistema NUNCA DEBE crear una membresía por el solo hecho de
+  consultar una invitación: unirse exige sesión iniciada y una petición
+  explícita de canje.
 - **RF-21** CUANDO un miembro sale de un espacio, el sistema DEBE eliminar
   su membresía y conservar los gastos que registró, que siguen
   perteneciendo al espacio (principio 8).
@@ -201,8 +216,8 @@ La spec se da por cumplida cuando, además de los tests por requisito:
 3. Un test comprueba que, tras cerrar sesión, el mismo token recibe `401`
    aunque no haya caducado (RF-12).
 4. Un test comprueba que una petición sin sesión no modifica nada (RF-11).
-5. Un test comprueba que un código de invitación no se puede canjear dos
-   veces (RF-19).
+5. Un test comprueba que una invitación no se puede canjear dos veces y que
+   consultarla no la consume (RF-19, RF-36, RF-37).
 6. Un test comprueba que borrar un espacio no toca los datos de otro
    espacio del mismo usuario (RF-27).
 7. `make test` y `make lint` pasan en verde.
@@ -213,3 +228,8 @@ La spec se da por cumplida cuando, además de los tests por requisito:
 y la sesión en la web, apoyándose en RF-8 a RF-12. La interfaz que recuerda
 el último espacio usado (RF-28) es responsabilidad de la web y del bot, en
 `007-dashboard-web` y `008-control-acceso`.
+
+La página `/unirse/<token>` a la que apunta el enlace de RF-15, que muestra
+el espacio (RF-36) y encadena registro, inicio de sesión y canje (RF-17), es
+de `007-dashboard-web`. El límite de peticiones al registro y al inicio de
+sesión es de `010-reverse-proxy` (decisión 9).

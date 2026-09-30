@@ -81,6 +81,8 @@ el registro exige un código vigente.
 - Hecho cuando: los tests pasan y el registro de T5 sigue funcionando solo
   cuando la base de datos está vacía.
 - RF: RF-2, RF-16, RF-19.
+- Reemplazada por T13 y T14 (ADR 0005): el registro pasa a ser abierto y la
+  invitación de instancia desaparece.
 
 ## [x] T8 — Espacios y la dependencia `member_space`
 `GET /spaces`, `POST /spaces` y la dependencia que resuelve el espacio solo
@@ -94,7 +96,7 @@ para sus miembros.
 - RF: RF-13, RF-14, RF-29, RF-30.
 
 ## [x] T9 — Invitación de espacio
-`POST /spaces/{id}/invitations`, `POST /invitations/{code}/redeem` y el
+`POST /spaces/{id}/invitations`, `POST /invitations/{token}/redeem` y el
 registro con invitación de espacio.
 
 - Test primero: un miembro emite el código y otro usuario lo canjea y queda
@@ -104,6 +106,8 @@ registro con invitación de espacio.
   espacio.
 - Hecho cuando: los tests pasan, incluido el criterio 5 de la spec.
 - RF: RF-15, RF-17, RF-18, RF-19, RF-20.
+- Reemplazada en parte por T13 (ADR 0005): el registro con invitación de
+  espacio desaparece; el canje con sesión se mantiene.
 
 ## [x] T10 — Salir de un espacio
 `DELETE /spaces/{id}/members/me`.
@@ -135,6 +139,76 @@ actualización del `README.md` y del `docs/roadmap.md`.
   `make test` y `make lint` están en verde, el README describe cómo
   registrarse e invitar, y la spec queda marcada en el roadmap.
 - RF: RF-28, RF-32.
+
+## Cambios del ADR 0005 — Registro abierto e invitación por enlace
+
+## [x] T13 — Registro abierto
+`POST /auth/register` deja de exigir y de aceptar invitaciones: se quitan la
+regla del primer usuario, `invitation_code` de `RegisterIn` y la rama que
+unía a un espacio al registrarse.
+
+- Test primero: con usuarios ya en la base de datos, alguien se registra
+  sin código y obtiene su usuario y su espacio "Personal" como único
+  espacio; un cuerpo que todavía trae `invitation_code` no une a nadie a
+  ningún espacio. Se retiran los tests de RF-2 y RF-18. Los de RF-19
+  (código usado dos veces, código caducado), que hoy pasan por el registro,
+  se reescriben sobre el canje con sesión para no perder cobertura.
+- Hecho cuando: los tests pasan y `auth.py` ya no importa nada de
+  `invitations.py`.
+- RF: RF-1, RF-3, RF-4, RF-19.
+
+## [x] T14 — Retirar la invitación de instancia
+Se quitan `POST /invitations/instance`, la columna `kind` y su
+`CheckConstraint`; `space_id` pasa a ser obligatorio. La base de datos local
+de desarrollo se recrea, con aprobación previa (nota del ADR 0004).
+
+- Test primero: `/invitations/instance` ya no aparece entre las rutas
+  publicadas (esquema OpenAPI); guardar una invitación sin `space_id` falla
+  en la base de datos. No se prueba con un `404`: cuando T16 añada
+  `GET /invitations/{token}`, un `POST` a esa ruta respondería `405`.
+- Hecho cuando: los tests pasan, no queda ninguna referencia a `instance`
+  ni a `kind` en `services/api` y `make run-api` arranca con la base de
+  datos recreada.
+- RF: RF-15 (RF-16 retirado).
+
+## [x] T15 — `WEB_BASE_URL` y el enlace completo
+`config.py` exige `WEB_BASE_URL` y le quita la `/` final;
+`POST /spaces/{id}/invitations` responde `url` y `expires_at` en lugar de
+`code`. Se añade la variable a `.env.example` y a `tests/conftest.py`.
+
+- Test primero: sin `WEB_BASE_URL`, la configuración falla nombrándola; con
+  `/` final, el enlace no sale con `//unirse`; la `url` empieza por
+  `<WEB_BASE_URL>/unirse/`, el token que contiene sirve para canjear y dos
+  enlaces seguidos no se repiten.
+- Hecho cuando: los tests pasan y `make run-api` sin la variable explica
+  qué falta.
+- RF: RF-15, RF-33.
+
+## [x] T16 — Consultar la invitación sin sesión
+`GET /invitations/{token}`: nombre del espacio y caducidad, sin
+autenticación y sin escribir en la base de datos.
+
+- Test primero: con un token vigente y sin cabecera `Authorization`
+  responde `200` con el nombre y la caducidad, y nada más (ni `id` del
+  espacio, ni miembros, ni quién invitó); después de consultarlo, el token
+  sigue sin usar y se puede canjear; consultarlo no crea ninguna membresía;
+  un token desconocido, usado o caducado responde `404` con el mismo
+  mensaje.
+- Hecho cuando: los tests pasan, incluido el criterio 5 de la spec.
+- RF: RF-19, RF-36, RF-37.
+
+## [x] T17 — Cierre del cambio: documentación
+`README.md`: el registro deja de pedir código y la tabla de invitaciones se
+sustituye por el flujo del enlace (compartir, consultar, canjear).
+`docs/roadmap.md`: anotar en `010-reverse-proxy` el límite de peticiones al
+registro y al inicio de sesión, y enmascarar el token de invitación en los
+logs.
+
+- Test primero: no aplica, es documentación. Se vuelven a comprobar los
+  siete criterios de validación de la spec.
+- Hecho cuando: `make test` y `make lint` están en verde y los ejemplos
+  `curl` del README funcionan contra `make run-api`.
+- RF: ninguno nuevo; cierra la decisión 9.
 
 ## Requisito que no se cierra en esta spec
 

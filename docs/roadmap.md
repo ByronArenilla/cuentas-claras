@@ -23,6 +23,12 @@ está validada. Marca con [x] las specs terminadas.
 
 ## Fase 3 — Nginx
 - [ ] 010-reverse-proxy
+  - Límite de peticiones (*rate limiting*) en `POST /auth/register` y
+    `POST /auth/login`: con el registro abierto, frena la creación masiva de
+    cuentas, la prueba de contraseñas y el recorrido de correos (ADR 0005).
+  - Enmascarar en los logs de acceso el token de invitación de
+    `/invitations/<token>` y `/unirse/<token>`: quien lea los logs no debe
+    poder canjear un enlace todavía sin usar (plan 001).
 
 ## Fase 4 — GitHub Actions
 - [ ] 011-integracion-continua

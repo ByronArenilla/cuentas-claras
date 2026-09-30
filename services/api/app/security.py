@@ -1,4 +1,4 @@
-"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15, RF-16).
+"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15).
 
 Contraseñas y tokens se tratan distinto a propósito. Una contraseña la elige
 una persona y se puede adivinar: necesita un hash lento y con sal (Argon2id).
@@ -35,11 +35,11 @@ def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def generate_invitation_code() -> str:
-    """Código de invitación aleatorio de 128 bits, seguro para usar en una URL."""
+def generate_invitation_token() -> str:
+    """Token de invitación aleatorio de 128 bits, seguro para usar en una URL."""
     return secrets.token_urlsafe(16)
 
 
 def hash_token(token: str) -> str:
-    """SHA-256 en hexadecimal: lo único que se guarda de un token o código."""
+    """SHA-256 en hexadecimal: lo único que se guarda de un token."""
     return hashlib.sha256(token.encode()).hexdigest()

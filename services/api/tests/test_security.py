@@ -1,7 +1,7 @@
 import hashlib
 
 from app.security import (
-    generate_invitation_code,
+    generate_invitation_token,
     generate_session_token,
     hash_password,
     hash_token,
@@ -48,13 +48,13 @@ def test_session_tokens_do_not_repeat() -> None:
     assert len(tokens) == 1000
 
 
-def test_invitation_codes_do_not_repeat() -> None:
-    codes = {generate_invitation_code() for _ in range(1000)}
+def test_invitation_tokens_do_not_repeat() -> None:
+    tokens = {generate_invitation_token() for _ in range(1000)}
 
-    assert len(codes) == 1000
+    assert len(tokens) == 1000
 
 
 def test_tokens_have_the_planned_entropy() -> None:
     # token_urlsafe(n) codifica n bytes en base64 sin relleno: ~1,33 chars/byte.
     assert len(generate_session_token()) == 43  # 32 bytes = 256 bits
-    assert len(generate_invitation_code()) == 22  # 16 bytes = 128 bits
+    assert len(generate_invitation_token()) == 22  # 16 bytes = 128 bits
