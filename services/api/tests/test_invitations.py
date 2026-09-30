@@ -17,10 +17,10 @@ from tests.conftest import WEB_BASE_URL, token_from
 Login = Callable[..., dict[str, str]]
 
 
-def invitation(engine: Engine, code: str) -> Invitation:
+def invitation(engine: Engine, token: str) -> Invitation:
     with Session(engine) as db:
         return db.scalars(
-            select(Invitation).where(Invitation.code_hash == hash_token(code))
+            select(Invitation).where(Invitation.code_hash == hash_token(token))
         ).one()
 
 
@@ -44,27 +44,27 @@ def space_names(client: TestClient, headers: dict[str, str]) -> list[str]:
 
 
 def test_instance_invitation_route_no_longer_exists() -> None:
-    # Se comprueban las rutas publicadas y no un código HTTP: cuando exista
-    # `GET /invitations/{token}` (T16), un POST aquí respondería 405 y no 404.
+    # Se comprueban las rutas publicadas y no un código HTTP: como existe
+    # `GET /invitations/{token}` (T16), un POST aquí responde 405 y no 404.
     # `app.routes` no sirve: agrupa cada router incluido en una sola entrada.
     paths = app.openapi()["paths"]
 
-    assert "/invitations/{code}/redeem" in paths, "el test no ve las rutas"
+    assert "/invitations/{token}/redeem" in paths, "el test no ve las rutas"
     assert "/invitations/instance" not in paths
 
 
-# --- Marca atómica del código (RF-19) ---
+# --- Marca atómica de la invitación (RF-19) ---
 
 
 def test_a_code_can_only_be_claimed_once(
     client: TestClient, engine: Engine, login: Login
 ) -> None:
-    # Simula dos canjes simultáneos: ambos vieron el código vigente y los
+    # Simula dos canjes simultáneos: ambos vieron la invitación vigente y los
     # dos intentan marcarlo; la segunda marca no debe afectar a ninguna fila.
     ana = login("ana@example.com")
-    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    token = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
     with Session(engine) as db:
-        row = find_valid_invitation(db, code)
+        row = find_valid_invitation(db, token)
         ana_id = db.scalars(select(User.id)).one()
 
         assert claim_invitation(db, row, ana_id) is True
@@ -80,10 +80,10 @@ def test_space_invitation_is_stored_hashed_and_lasts_a_day(
     ana = login("ana@example.com")
     space_id = create_space(client, ana, "Casa")
 
-    code = issue_space_invitation(client, ana, space_id)
+    token = issue_space_invitation(client, ana, space_id)
 
-    row = invitation(engine, code)
-    assert row.code_hash != code
+    row = invitation(engine, token)
+    assert row.code_hash != token
     assert (row.space_id, row.used_at) == (space_id, None)
     expected = datetime.now(UTC) + timedelta(hours=24)
     assert abs(row.expires_at - expected) < timedelta(minutes=1)
@@ -155,14 +155,14 @@ def test_redeeming_makes_the_user_a_member(
 ) -> None:
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = create_space(client, ana, "Casa")
-    code = issue_space_invitation(client, ana, space_id)
+    token = issue_space_invitation(client, ana, space_id)
 
-    response = client.post(f"/invitations/{code}/redeem", headers=bea)
+    response = client.post(f"/invitations/{token}/redeem", headers=bea)
 
     assert response.status_code == 200
     assert response.json() == {"id": space_id, "name": "Casa"}
     assert space_names(client, bea) == ["Personal", "Casa"]
-    row = invitation(engine, code)
+    row = invitation(engine, token)
     assert row.used_at is not None
     assert row.used_by == client.get("/me", headers=bea).json()["id"]
 
@@ -172,10 +172,10 @@ def test_space_code_cannot_be_redeemed_twice(client: TestClient, login: Login) -
     ana, bea = login("ana@example.com"), login("bea@example.com")
     carla = login("carla@example.com")
     space_id = create_space(client, ana, "Casa")
-    code = issue_space_invitation(client, ana, space_id)
-    client.post(f"/invitations/{code}/redeem", headers=bea)
+    token = issue_space_invitation(client, ana, space_id)
+    client.post(f"/invitations/{token}/redeem", headers=bea)
 
-    response = client.post(f"/invitations/{code}/redeem", headers=carla)
+    response = client.post(f"/invitations/{token}/redeem", headers=carla)
 
     assert response.status_code == 403
     assert space_names(client, carla) == ["Personal"]
@@ -186,20 +186,20 @@ def test_existing_member_is_rejected_and_code_stays_unused(
 ) -> None:
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = create_space(client, ana, "Casa")
-    code = issue_space_invitation(client, ana, space_id)
+    token = issue_space_invitation(client, ana, space_id)
 
-    response = client.post(f"/invitations/{code}/redeem", headers=ana)
+    response = client.post(f"/invitations/{token}/redeem", headers=ana)
 
     assert response.status_code == 409
-    assert invitation(engine, code).used_at is None
-    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 200
+    assert invitation(engine, token).used_at is None
+    assert client.post(f"/invitations/{token}/redeem", headers=bea).status_code == 200
 
 
 def test_expired_space_code_is_rejected(
     client: TestClient, engine: Engine, login: Login
 ) -> None:
     ana, bea = login("ana@example.com"), login("bea@example.com")
-    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    token = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
     with Session(engine) as db:
         db.execute(
             update(Invitation).values(
@@ -208,24 +208,24 @@ def test_expired_space_code_is_rejected(
         )
         db.commit()
 
-    response = client.post(f"/invitations/{code}/redeem", headers=bea)
+    response = client.post(f"/invitations/{token}/redeem", headers=bea)
 
     assert response.status_code == 403
     assert space_names(client, bea) == ["Personal"]
-    assert invitation(engine, code).used_at is None
+    assert invitation(engine, token).used_at is None
 
 
 def test_unknown_code_cannot_be_redeemed(client: TestClient, login: Login) -> None:
-    response = client.post("/invitations/codigo-inventado/redeem", headers=login())
+    response = client.post("/invitations/token-inventado/redeem", headers=login())
 
     assert response.status_code == 403
 
 
 def test_redeeming_requires_a_session(client: TestClient, login: Login) -> None:
     ana = login()
-    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    token = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
 
-    assert client.post(f"/invitations/{code}/redeem").status_code == 401
+    assert client.post(f"/invitations/{token}/redeem").status_code == 401
 
 
 def test_shared_space_fixture_has_two_members(
@@ -257,16 +257,16 @@ def test_previewing_shows_only_space_name_and_expiry(
     # RF-36: sin cabecera Authorization, y nada más que nombre y caducidad
     # (ni id del espacio, ni miembros, ni quién invitó).
     ana = login("ana@example.com")
-    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    token = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
 
-    response = client.get(f"/invitations/{code}")
+    response = client.get(f"/invitations/{token}")
 
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {"space_name", "expires_at"}
     assert body["space_name"] == "Casa"
     expires_at = datetime.fromisoformat(body["expires_at"])
-    assert expires_at == invitation(engine, code).expires_at
+    assert expires_at == invitation(engine, token).expires_at
 
 
 def test_previewing_does_not_consume_the_invitation(
@@ -275,14 +275,14 @@ def test_previewing_does_not_consume_the_invitation(
     # Criterio de validación 5: consultar no gasta el enlace; canjear sí.
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = create_space(client, ana, "Casa")
-    code = issue_space_invitation(client, ana, space_id)
+    token = issue_space_invitation(client, ana, space_id)
 
-    assert client.get(f"/invitations/{code}").status_code == 200
-    assert client.get(f"/invitations/{code}").status_code == 200
+    assert client.get(f"/invitations/{token}").status_code == 200
+    assert client.get(f"/invitations/{token}").status_code == 200
 
-    row = invitation(engine, code)
+    row = invitation(engine, token)
     assert (row.used_at, row.used_by) == (None, None)
-    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 200
+    assert client.post(f"/invitations/{token}/redeem", headers=bea).status_code == 200
 
 
 def test_previewing_never_creates_a_membership(
@@ -290,11 +290,11 @@ def test_previewing_never_creates_a_membership(
 ) -> None:
     # RF-37: ni siquiera con sesión iniciada; unirse exige el canje explícito.
     ana, bea = login("ana@example.com"), login("bea@example.com")
-    code = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
+    token = issue_space_invitation(client, ana, create_space(client, ana, "Casa"))
     before = membership_count(engine)
 
-    client.get(f"/invitations/{code}")
-    client.get(f"/invitations/{code}", headers=bea)
+    client.get(f"/invitations/{token}")
+    client.get(f"/invitations/{token}", headers=bea)
 
     assert membership_count(engine) == before
     assert space_names(client, bea) == ["Personal"]
@@ -317,8 +317,8 @@ def test_invalid_invitations_preview_as_404_with_the_same_message(
         db.commit()
 
     responses = [
-        client.get(f"/invitations/{code}")
-        for code in ("codigo-inventado", used, expired)
+        client.get(f"/invitations/{token}")
+        for token in ("token-inventado", used, expired)
     ]
 
     assert [response.status_code for response in responses] == [404, 404, 404]

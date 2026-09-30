@@ -79,6 +79,6 @@ def shared_space(
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = client.post("/spaces", json={"name": "Casa"}, headers=ana).json()["id"]
     url = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["url"]
-    code = token_from(url)
-    client.post(f"/invitations/{code}/redeem", headers=bea).raise_for_status()
+    token = token_from(url)
+    client.post(f"/invitations/{token}/redeem", headers=bea).raise_for_status()
     return space_id, ana, bea

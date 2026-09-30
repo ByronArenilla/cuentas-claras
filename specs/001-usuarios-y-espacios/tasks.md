@@ -96,7 +96,7 @@ para sus miembros.
 - RF: RF-13, RF-14, RF-29, RF-30.
 
 ## [x] T9 — Invitación de espacio
-`POST /spaces/{id}/invitations`, `POST /invitations/{code}/redeem` y el
+`POST /spaces/{id}/invitations`, `POST /invitations/{token}/redeem` y el
 registro con invitación de espacio.
 
 - Test primero: un miembro emite el código y otro usuario lo canjea y queda

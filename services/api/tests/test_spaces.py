@@ -328,11 +328,11 @@ def test_pending_invitations_die_with_the_space(
     ana, bea = login("ana@example.com"), login("bea@example.com")
     space_id = create_space(client, ana, "Viajes")["id"]
     url = client.post(f"/spaces/{space_id}/invitations", headers=ana).json()["url"]
-    code = token_from(url)
+    token = token_from(url)
 
     delete_space(client, ana, space_id, "Viajes")
 
-    assert client.post(f"/invitations/{code}/redeem", headers=bea).status_code == 403
+    assert client.post(f"/invitations/{token}/redeem", headers=bea).status_code == 403
     assert names(client, bea) == ["Personal"]
 
 

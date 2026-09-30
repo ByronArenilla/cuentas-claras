@@ -82,8 +82,9 @@ class Invitation(Base):
     __tablename__ = "invitations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Se guarda el hash y no el código: una copia de la base de datos no
-    # entrega invitaciones utilizables.
+    # Se guarda el hash y no el token: una copia de la base de datos no
+    # entrega invitaciones utilizables. La columna conserva el nombre
+    # `code_hash` porque `create_all` no renombra columnas (ADR 0004).
     code_hash: Mapped[str] = mapped_column(String(64), unique=True)
     space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
