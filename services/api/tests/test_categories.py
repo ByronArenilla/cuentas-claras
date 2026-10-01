@@ -10,6 +10,7 @@ from app.routers import auth
 from tests.conftest import PASSWORD, token_from
 
 Login = Callable[..., dict[str, str]]
+SharedSpace = tuple[int, dict[str, str], dict[str, str]]
 
 # Spec 002, decisión 1.
 DEFAULTS = ["Hogar", "Comida", "Transporte", "Salud", "Servicios", "Ocio", "Otros"]
@@ -102,3 +103,45 @@ def test_registration_is_all_or_nothing_with_the_defaults(
 
     for model in (User, Space, Membership, Category):
         assert count(engine, model) == 0, model.__name__
+
+
+# --- Listar (RF-4) ---
+
+
+def test_a_member_lists_the_categories_in_creation_order(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # Criterio de validación 1.
+    ana = login("ana@example.com")
+    space_id = client.get("/spaces", headers=ana).json()[0]["id"]
+
+    response = client.get(f"/spaces/{space_id}/categories", headers=ana)
+
+    assert response.status_code == 200
+    stored = stored_categories(engine, space_id)
+    assert response.json() == [{"id": c.id, "name": c.name} for c in stored]
+    assert [category["name"] for category in response.json()] == DEFAULTS
+    assert "name_key" not in response.text
+
+
+def test_two_members_see_the_same_categories(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # Parte del criterio de validación 4.
+    space_id, ana, bea = shared_space
+
+    ana_view = client.get(f"/spaces/{space_id}/categories", headers=ana)
+    bea_view = client.get(f"/spaces/{space_id}/categories", headers=bea)
+
+    assert ana_view.status_code == bea_view.status_code == 200
+    assert ana_view.json() == bea_view.json()
+
+
+def test_listing_categories_without_a_session_is_rejected(
+    client: TestClient, login: Login
+) -> None:
+    # RF-10 (RF-11 de la 001).
+    ana = login("ana@example.com")
+    space_id = client.get("/spaces", headers=ana).json()[0]["id"]
+
+    assert client.get(f"/spaces/{space_id}/categories").status_code == 401

@@ -84,6 +84,14 @@ class SpaceOut(BaseModel):
     name: str
 
 
+class CategoryOut(BaseModel):
+    # Sin `name_key`: la clave solo sirve para comparar nombres (plan 002).
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 class RegisterOut(BaseModel):
     id: int
     email: str

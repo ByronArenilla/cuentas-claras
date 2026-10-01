@@ -39,7 +39,7 @@ sesión del `conftest.py`.
 - Hecho cuando: los tests pasan y el resto de la suite sigue en verde.
 - RF: RF-1, RF-2, RF-3.
 
-## [ ] T3 — Listar categorías
+## [x] T3 — Listar categorías
 `GET /spaces/{space_id}/categories` con `member_space`, `CategoryOut`
 (`id`, `name`) en `schemas.py`, orden por `id`, y el router montado en
 `main.py`.
