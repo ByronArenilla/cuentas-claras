@@ -54,7 +54,7 @@ sesión del `conftest.py`.
   `{space_id}` sigue en verde con la ruta nueva.
 - RF: RF-4, RF-10.
 
-## [ ] T4 — Crear categorías
+## [x] T4 — Crear categorías
 `POST /spaces/{space_id}/categories` con `CategoryIn` (nombre sin espacios
 alrededor, de 1 a 50 caracteres). Si el nombre ya existe según `name_key`,
 responde `409` con "Ya existe la categoría «<nombre guardado>» en este

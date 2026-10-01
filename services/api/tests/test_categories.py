@@ -2,11 +2,12 @@ from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Category, Membership, Space, User
-from app.routers import auth
+from app.routers import auth, categories
 from tests.conftest import PASSWORD, token_from
 
 Login = Callable[..., dict[str, str]]
@@ -145,3 +146,135 @@ def test_listing_categories_without_a_session_is_rejected(
     space_id = client.get("/spaces", headers=ana).json()[0]["id"]
 
     assert client.get(f"/spaces/{space_id}/categories").status_code == 401
+
+
+# --- Crear (RF-5 a RF-9) ---
+
+
+def personal_space(client: TestClient, headers: dict[str, str]) -> int:
+    return client.get("/spaces", headers=headers).json()[0]["id"]
+
+
+def create_category(
+    client: TestClient, headers: dict[str, str], space_id: int, name: str
+) -> Response:
+    return client.post(
+        f"/spaces/{space_id}/categories", json={"name": name}, headers=headers
+    )
+
+
+def listed_names(client: TestClient, headers: dict[str, str], space_id: int) -> list:
+    response = client.get(f"/spaces/{space_id}/categories", headers=headers)
+    return [category["name"] for category in response.json()]
+
+
+def test_a_member_creates_a_category_the_other_member_sees(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # RF-5 y criterio de validación 4.
+    space_id, ana, bea = shared_space
+
+    response = create_category(client, ana, space_id, "Mascotas")
+
+    assert response.status_code == 201
+    assert response.json() == {"id": response.json()["id"], "name": "Mascotas"}
+    assert listed_names(client, ana, space_id) == [*DEFAULTS, "Mascotas"]
+    assert listed_names(client, bea, space_id) == [*DEFAULTS, "Mascotas"]
+
+
+def test_the_name_is_stored_without_surrounding_spaces(
+    client: TestClient, login: Login
+) -> None:
+    # RF-6.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    response = create_category(client, ana, space_id, "  Mascotas  ")
+
+    assert response.json()["name"] == "Mascotas"
+    assert listed_names(client, ana, space_id)[-1] == "Mascotas"
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 51])
+def test_invalid_category_name_is_rejected(
+    client: TestClient, login: Login, name: str
+) -> None:
+    # RF-7: el nombre tiene entre 1 y 50 caracteres (decisión 5).
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    response = create_category(client, ana, space_id, name)
+
+    assert response.status_code == 422
+    assert "50" in response.text
+    assert listed_names(client, ana, space_id) == DEFAULTS
+
+
+def test_a_name_of_exactly_fifty_characters_is_accepted(
+    client: TestClient, login: Login
+) -> None:
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    assert create_category(client, ana, space_id, "x" * 50).status_code == 201
+
+
+@pytest.mark.parametrize("name", ["comida", "Cómida", " COMIDA "])
+def test_an_equivalent_name_is_rejected_within_the_space(
+    client: TestClient, login: Login, name: str
+) -> None:
+    # RF-8 y criterio de validación 5: el mensaje muestra el nombre guardado.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    response = create_category(client, ana, space_id, name)
+
+    assert response.status_code == 409
+    assert "«Comida»" in response.json()["detail"]
+    assert listed_names(client, ana, space_id) == DEFAULTS
+
+
+def test_enye_and_n_are_different_names(client: TestClient, login: Login) -> None:
+    # Decisión 4: la ñ es una letra propia.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    assert create_category(client, ana, space_id, "Año").status_code == 201
+    assert create_category(client, ana, space_id, "Ano").status_code == 201
+
+
+def test_the_same_name_is_allowed_in_another_space(
+    client: TestClient, login: Login
+) -> None:
+    # RF-9 y criterio de validación 5.
+    ana = login("ana@example.com")
+    personal = personal_space(client, ana)
+    casa = client.post("/spaces", json={"name": "Casa"}, headers=ana).json()["id"]
+
+    assert create_category(client, ana, personal, "Mascotas").status_code == 201
+    assert create_category(client, ana, casa, "mascotas").status_code == 201
+
+
+def test_a_duplicate_caught_by_the_database_gets_the_same_answer(
+    client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # RF-8: si dos peticiones pasan la comprobación previa a la vez, el índice
+    # único frena la segunda. Se simula que la comprobación no vio nada.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    real = categories.existing_name
+    calls: list[object] = []
+
+    def misses_once(*args: object) -> str | None:
+        calls.append(args)
+        return None if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(categories, "existing_name", misses_once)
+
+    response = create_category(client, ana, space_id, "comida")
+
+    assert response.status_code == 409
+    assert "«Comida»" in response.json()["detail"]
+    # Dos consultas: la previa, que no vio nada, y la de después del rollback.
+    assert len(calls) == 2
+    assert listed_names(client, ana, space_id) == DEFAULTS
