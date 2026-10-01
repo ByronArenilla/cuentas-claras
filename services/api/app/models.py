@@ -1,5 +1,6 @@
-"""Tablas de usuarios, espacios, membresías, invitaciones y sesiones."""
+"""Tablas de usuarios, espacios, membresías, invitaciones, sesiones y categorías."""
 
+import unicodedata
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -10,7 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.engine.interfaces import Dialect
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
 
 class UTCDateTime(TypeDecorator[datetime]):
@@ -101,3 +102,48 @@ class Session(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+
+
+# Virgulilla suelta que, detrás de una `n`, forma la `ñ` en la forma NFD.
+_TILDE = "\u0303"
+
+
+def category_key(name: str) -> str:
+    """Clave con la que se comparan los nombres de categoría (spec 002, decisión 4).
+
+    Ignora mayúsculas, tildes, diéresis y espacios alrededor, pero no la ñ:
+    "Educación" y "educacion" dan la misma clave; "Año" y "Ano", no.
+    """
+    # NFD separa cada letra de su acento: "é" pasa a ser "e" + marca suelta.
+    decomposed = unicodedata.normalize("NFD", name.strip().casefold())
+    kept: list[str] = []
+    for char in decomposed:
+        is_enye = char == _TILDE and kept[-1:] == ["n"]
+        if unicodedata.combining(char) and not is_enye:
+            continue
+        kept.append(char)
+    # NFC vuelve a unir la "n" con su virgulilla en una sola "ñ".
+    return unicodedata.normalize("NFC", "".join(kept))
+
+
+class Category(Base):
+    __tablename__ = "categories"
+    # La base de datos impide dos nombres equivalentes en el mismo espacio
+    # aunque dos peticiones lleguen a la vez (RF-8); en espacios distintos
+    # el mismo nombre está permitido (RF-9).
+    __table_args__ = (UniqueConstraint("space_id", "name_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(50))
+    # Solo para comparar; nunca sale en una respuesta. Sin límite de longitud
+    # porque `casefold` puede alargar el texto ("ß" pasa a ser "ss").
+    name_key: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+
+    @validates("name")
+    def _fill_name_key(self, _key: str, name: str) -> str:
+        """Recalcula `name_key` cada vez que se asigna el nombre: así las dos
+        columnas no pueden quedar desalineadas (plan 002)."""
+        self.name_key = category_key(name)
+        return name

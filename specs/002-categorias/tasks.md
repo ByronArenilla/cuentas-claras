@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — Modelo `Category` y clave normalizada
+## [x] T1 — Modelo `Category` y clave normalizada
 `app/models.py`: la tabla `categories` (`id`, `space_id` con
 `ON DELETE CASCADE`, `name`, `name_key`, `created_at`), el índice único
 sobre (`space_id`, `name_key`), la función pura `category_key()` y el
