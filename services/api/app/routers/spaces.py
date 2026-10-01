@@ -14,6 +14,7 @@ from sqlalchemy.sql.selectable import ScalarSelect
 from app.db import get_db
 from app.deps import current_user, member_space
 from app.models import Membership, Space, User
+from app.routers.categories import add_default_categories
 from app.routers.invitations import issue_invitation
 from app.schemas import InvitationOut, SpaceIn, SpaceOut
 
@@ -61,11 +62,13 @@ def create_space(
     user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> SpaceOut:
-    """Crea el espacio y deja a quien lo crea como miembro, en una transacción."""
+    """Crea el espacio con sus categorías predefinidas y deja a quien lo crea
+    como miembro, en una transacción (RF-13 de la 001, RF-1 de la 002)."""
     space = Space(name=data.name)
     db.add(space)
     db.flush()
     db.add(Membership(user_id=user.id, space_id=space.id))
+    add_default_categories(db, space.id)
     db.commit()
     return SpaceOut.model_validate(space)
 

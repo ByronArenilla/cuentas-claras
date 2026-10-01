@@ -12,6 +12,7 @@ from app.db import get_db
 from app.deps import current_session, current_user
 from app.models import Membership, Space, User
 from app.models import Session as SessionRow
+from app.routers.categories import add_default_categories
 from app.schemas import LoginIn, RegisterIn, RegisterOut, SpaceOut, TokenOut, UserOut
 from app.security import (
     generate_session_token,
@@ -40,7 +41,8 @@ router = APIRouter(tags=["auth"])
 
 @router.post("/auth/register", status_code=status.HTTP_201_CREATED)
 def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> RegisterOut:
-    """Crea usuario, espacio personal y membresía en una sola transacción.
+    """Crea usuario, espacio personal, membresía y categorías predefinidas en
+    una sola transacción (RF-3 de la 001, RF-1 de la 002).
 
     El registro es abierto y no sabe nada de invitaciones (RF-1, ADR 0005):
     quien llega por un enlace se registra y después canjea la invitación.
@@ -54,6 +56,7 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
     try:
         db.flush()
         db.add(Membership(user_id=user.id, space_id=space.id))
+        add_default_categories(db, space.id)
         db.commit()
     except IntegrityError:
         # Otra petición registró el mismo correo entre la comprobación y el

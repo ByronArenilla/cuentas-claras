@@ -22,7 +22,7 @@ validador `@validates("name")` que rellena `name_key`.
   `conftest.py`.
 - RF: base de RF-2, RF-8, RF-9 y RF-11.
 
-## [ ] T2 — Categorías predefinidas al crear un espacio
+## [x] T2 — Categorías predefinidas al crear un espacio
 `app/routers/categories.py` con `DEFAULT_CATEGORIES` y
 `add_default_categories(db, space_id)`. El registro y `POST /spaces` la
 llaman antes del `commit`, en la misma transacción que crea el espacio.
