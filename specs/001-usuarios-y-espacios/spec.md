@@ -29,7 +29,7 @@ specs siguientes pueden colgar sus datos de un espacio.
 
 - La pantalla de inicio de sesión de la web y la vinculación del `chat_id`
   de Telegram a un usuario: son de `008-control-acceso`.
-- Gastos, categorías y presupuestos: specs 002, 003 y 004. Esta spec solo
+- Categorías, gastos y presupuestos: specs 002, 003 y 004. Esta spec solo
   fija la regla de aislamiento que aquellas deberán cumplir.
 - Recuperación de contraseña, verificación de correo y cambio de correo.
 - Roles y permisos distintos dentro de un espacio, y expulsar a un miembro:

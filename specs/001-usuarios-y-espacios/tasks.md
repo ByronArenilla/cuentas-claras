@@ -214,4 +214,4 @@ logs.
 
 **RF-31** (un gasto guarda su espacio y quién lo registró) no se puede
 verificar aquí porque los gastos no existen todavía. Queda como requisito
-heredado: la spec `002-api-gastos` debe cubrirlo y citarlo.
+heredado: la spec `003-api-gastos` debe cubrirlo y citarlo.
