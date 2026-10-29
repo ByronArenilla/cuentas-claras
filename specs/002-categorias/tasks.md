@@ -76,7 +76,7 @@ espacio.", tanto si lo detecta la consulta previa como si lo detecta el
 - Hecho cuando: los tests pasan.
 - RF: RF-5, RF-6, RF-7, RF-8, RF-9.
 
-## [ ] T5 — Aislamiento con categorías
+## [x] T5 — Aislamiento con categorías
 `test_isolation.py`: amplía los criterios de aislamiento de la 001 con
 categorías y actualiza su docstring, que dice que aún no hay datos del
 presupuesto. Si T3 y T4 están bien hechas, no debería hacer falta código
