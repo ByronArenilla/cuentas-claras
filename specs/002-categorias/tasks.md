@@ -101,7 +101,7 @@ simultáneas).
 - Hecho cuando: el ADR existe y el plan lo cita.
 - RF: ninguno; principio 4.
 
-## [ ] T7 — Cierre: base de datos local, README y validación
+## [x] T7 — Cierre: base de datos local, README y validación
 - Borrar `services/api/budget.db` **con aprobación previa** y comprobar que
   `make run-api` la recrea con la tabla `categories` (decisión 3).
 - `README.md`: sección de categorías con ejemplos `curl` de listar y crear.
