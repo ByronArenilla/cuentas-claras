@@ -61,6 +61,10 @@ def test_creating_a_space_gives_it_its_own_defaults(
     assert [category.name for category in casa] == DEFAULTS
     assert not {c.id for c in personal} & {c.id for c in casa}
 
+    # Criterio de validación 2: lo que se crea en un espacio no sale en el otro.
+    create_category(client, ana, casa_id, "Mascotas")
+    assert listed_names(client, ana, personal_id) == DEFAULTS
+
 
 def test_joining_a_space_does_not_touch_its_categories(
     client: TestClient, engine: Engine, login: Login

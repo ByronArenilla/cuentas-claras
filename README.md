@@ -91,6 +91,38 @@ contra la API.
 miembro, `DELETE /spaces/{id}?confirm=<nombre exacto>` lo borra con todos sus
 datos. Nadie puede quedarse sin ningún espacio.
 
+## Categorías
+Cada gasto pertenecerá a una categoría, y cada espacio tiene las suyas.
+Todo espacio nuevo nace con siete predefinidas: Hogar, Comida, Transporte,
+Salud, Servicios, Ocio y Otros. Desde ese momento son del espacio, y
+cualquier miembro puede añadir más.
+
+**Listar.** Devuelve las categorías del espacio en orden de creación:
+primero las predefinidas y después las nuevas.
+
+```sh
+curl localhost:8000/spaces/1/categories \
+  -H 'Authorization: Bearer <token de Ana>'
+# [{"id": 1, "name": "Hogar"}, {"id": 2, "name": "Comida"}, ...]
+```
+
+**Crear.** El nombre se guarda tal como se escribió, sin los espacios de
+alrededor, y debe tener entre 1 y 50 caracteres.
+
+```sh
+curl -X POST localhost:8000/spaces/1/categories \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' -d '{"name": "Mascotas"}'
+# {"id": 8, "name": "Mascotas"}
+```
+
+Dos nombres que solo se diferencian en mayúsculas, tildes o diéresis son el
+mismo: si ya existe "Comida", crear "cómida" responde `409` con "Ya existe
+la categoría «Comida» en este espacio.". La ñ sí cuenta, así que "Año" y
+"Ano" pueden convivir. Otro espacio puede tener su propia "Comida". El
+porqué de esta comparación está en el
+[ADR 0006](docs/adr/0006-clave-normalizada-para-nombres-de-categoria.md).
+
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.
 - [`docs/roadmap.md`](docs/roadmap.md): fases y specs.
