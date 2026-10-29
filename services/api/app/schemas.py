@@ -84,6 +84,36 @@ class SpaceOut(BaseModel):
     name: str
 
 
+MAX_CATEGORY_NAME_LENGTH = 50
+
+
+class CategoryIn(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, value: str) -> str:
+        # Se guarda sin espacios alrededor (RF-6) y el límite se mide después
+        # de quitarlos, así "   " cuenta como vacío (RF-7, decisión 5).
+        name = value.strip()
+        if not 1 <= len(name) <= MAX_CATEGORY_NAME_LENGTH:
+            raise PydanticCustomError(
+                "invalid_category_name",
+                "El nombre de la categoría debe tener entre 1 y {max_length} "
+                "caracteres.",
+                {"max_length": MAX_CATEGORY_NAME_LENGTH},
+            )
+        return name
+
+
+class CategoryOut(BaseModel):
+    # Sin `name_key`: la clave solo sirve para comparar nombres (plan 002).
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
 class RegisterOut(BaseModel):
     id: int
     email: str

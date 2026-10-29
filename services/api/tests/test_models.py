@@ -5,7 +5,7 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Invitation, Membership, Space, User
+from app.models import Category, Invitation, Membership, Space, User, category_key
 
 
 def make_user(session: Session, email: str = "ana@example.com") -> User:
@@ -93,3 +93,82 @@ def test_dates_come_back_in_utc(session: Session) -> None:
 
     created_at = session.get(User, user.id).created_at
     assert created_at.tzinfo is UTC
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (" Comida ", "comida"),
+        ("Cómida", "comida"),
+        ("Educacion", "Educación"),
+        ("AÑO", "año"),
+        ("Pingüino", "pinguino"),
+    ],
+)
+def test_category_key_ignores_case_accents_and_surrounding_spaces(
+    first: str, second: str
+) -> None:
+    # Spec 002, decisión 4.
+    assert category_key(first) == category_key(second)
+
+
+def test_category_key_keeps_the_enye_apart_from_the_n() -> None:
+    # La ñ es una letra propia: "Año" y "Ano" son categorías distintas.
+    assert category_key("Año") != category_key("Ano")
+
+
+def test_category_fills_its_key_from_the_name(session: Session) -> None:
+    category = Category(space_id=make_space(session).id, name="Educación")
+
+    assert category.name_key == category_key("Educación")
+
+
+def test_same_key_is_rejected_within_a_space(session: Session) -> None:
+    # RF-8: la base de datos frena el duplicado aunque el código no lo vea.
+    space = make_space(session)
+    session.add(Category(space_id=space.id, name="Comida"))
+    session.flush()
+
+    session.add(Category(space_id=space.id, name="cómida"))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_same_key_is_allowed_in_different_spaces(session: Session) -> None:
+    # RF-9: cada espacio tiene sus propias categorías.
+    casa, viajes = make_space(session, "Casa"), make_space(session, "Viajes")
+    session.add_all(
+        [
+            Category(space_id=casa.id, name="Comida"),
+            Category(space_id=viajes.id, name="Comida"),
+        ]
+    )
+    session.flush()
+
+    assert len(session.scalars(select(Category)).all()) == 2
+
+
+def test_category_to_missing_space_is_rejected(session: Session) -> None:
+    # RF-2: toda categoría pertenece a un espacio que existe.
+    session.add(Category(space_id=999, name="Comida"))
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_deleting_space_cascades_to_its_categories(session: Session) -> None:
+    # RF-11.
+    doomed, kept = make_space(session, "Casa"), make_space(session, "Viajes")
+    session.add_all(
+        [
+            Category(space_id=doomed.id, name="Comida"),
+            Category(space_id=kept.id, name="Comida"),
+        ]
+    )
+    session.flush()
+
+    session.delete(doomed)
+    session.flush()
+
+    remaining = session.scalars(select(Category.space_id)).all()
+    assert remaining == [kept.id]
