@@ -12,7 +12,7 @@ bastando (ADR 0004).
 
 | Decisión | Elegido | Por qué |
 |---|---|---|
-| Comparar nombres (decisión 4) | Columna `name_key` con el nombre normalizado e índice único sobre (`space_id`, `name_key`) | La base de datos impide el duplicado aunque lleguen dos peticiones a la vez (RF-8). Se descartó comparar en SQL: `lower()` de SQLite solo entiende ASCII y no quita tildes. Deja ADR 0006. |
+| Comparar nombres (decisión 4) | Columna `name_key` con el nombre normalizado e índice único sobre (`space_id`, `name_key`) | La base de datos impide el duplicado aunque lleguen dos peticiones a la vez (RF-8). Se descartó comparar en SQL: `lower()` de SQLite solo entiende ASCII y no quita tildes (ADR 0006). |
 | Dónde se calcula `name_key` | Validador de SQLAlchemy en el modelo (`@validates("name")`) | Toda categoría, predefinida o nueva, recibe su clave al asignar el nombre. Nadie puede olvidarse de calcularla, tampoco una futura spec que renombre categorías. |
 | Normalización | Biblioteca estándar: `str.casefold` y `unicodedata` | Sin dependencias nuevas. Ver "Normalización del nombre". |
 | Crear las predefinidas | Función `add_default_categories(db, space_id)`, llamada desde el registro y desde la creación de espacios antes del `commit` | Cada creación de espacio ocurre ya en una transacción: las categorías entran en la misma y o se guarda todo o nada (RF-1). Sigue el patrón de `issue_invitation`, que un router expone y otro reutiliza. |

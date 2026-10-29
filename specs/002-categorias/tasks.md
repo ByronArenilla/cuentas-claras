@@ -90,7 +90,7 @@ nuevo; si algún test falla, se corrige en esta tarea.
 - Hecho cuando: los tests pasan.
 - RF: RF-10, RF-11.
 
-## [ ] T6 — ADR 0006: clave normalizada para nombres de categoría
+## [x] T6 — ADR 0006: clave normalizada para nombres de categoría
 `docs/adr/0006-clave-normalizada-para-nombres-de-categoria.md` con la
 plantilla `0000-plantilla.md`. Recoge por qué se guarda `name_key` con
 índice único y por qué se descartaron comparar en SQL (`lower()` de SQLite
