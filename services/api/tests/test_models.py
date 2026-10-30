@@ -1,11 +1,19 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Category, Invitation, Membership, Space, User, category_key
+from app.models import (
+    Category,
+    Expense,
+    Invitation,
+    Membership,
+    Space,
+    User,
+    category_key,
+)
 
 
 def make_user(session: Session, email: str = "ana@example.com") -> User:
@@ -172,3 +180,96 @@ def test_deleting_space_cascades_to_its_categories(session: Session) -> None:
 
     remaining = session.scalars(select(Category.space_id)).all()
     assert remaining == [kept.id]
+
+
+def make_expense(
+    session: Session, space: Space, user: User, **fields: object
+) -> Expense:
+    """Gasto válido en `space`, con una categoría nueva de ese espacio."""
+    category = Category(space_id=space.id, name=f"Comida {space.id}")
+    session.add(category)
+    session.flush()
+    values: dict[str, object] = {
+        "space_id": space.id,
+        "category_id": category.id,
+        "created_by": user.id,
+        "amount": 20_000,
+        "payment_type": "debit",
+        "spent_on": date(2026, 10, 31),
+        **fields,
+    }
+    expense = Expense(**values)
+    session.add(expense)
+    session.flush()
+    return expense
+
+
+def test_expense_is_saved_and_read_back(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    expense = make_expense(session, space, user, description="Mercado")
+    session.expire_all()
+
+    saved = session.get(Expense, expense.id)
+    assert saved.amount == 20_000
+    assert saved.payment_type == "debit"
+    assert saved.spent_on == date(2026, 10, 31)
+    assert type(saved.spent_on) is date
+    assert saved.description == "Mercado"
+    assert saved.created_by == user.id
+    assert saved.created_at.tzinfo is UTC
+
+
+def test_expense_description_is_optional(session: Session) -> None:
+    expense = make_expense(session, make_space(session), make_user(session))
+
+    assert expense.description is None
+
+
+@pytest.mark.parametrize("amount", [0, -1])
+def test_database_rejects_amount_not_greater_than_zero(
+    session: Session, amount: int
+) -> None:
+    # RF-3: última defensa si algo salta la validación de la API.
+    with pytest.raises(IntegrityError):
+        make_expense(session, make_space(session), make_user(session), amount=amount)
+
+
+@pytest.mark.parametrize("payment_type", ["cash", "CREDIT", ""])
+def test_database_rejects_unknown_payment_type(
+    session: Session, payment_type: str
+) -> None:
+    # RF-4: solo `credit` o `debit`.
+    with pytest.raises(IntegrityError):
+        make_expense(
+            session,
+            make_space(session),
+            make_user(session),
+            payment_type=payment_type,
+        )
+
+
+def test_amount_of_one_trillion_fits(session: Session) -> None:
+    # El tope de la decisión 7 no cabe en un entero de 32 bits.
+    expense = make_expense(
+        session, make_space(session), make_user(session), amount=1_000_000_000_000
+    )
+    session.expire_all()
+
+    assert session.get(Expense, expense.id).amount == 1_000_000_000_000
+
+
+def test_deleting_space_cascades_to_its_expenses_and_categories(
+    session: Session,
+) -> None:
+    # RF-21. Se borra con una sentencia, como la ruta de la spec 001: la
+    # cascada quita categorías y gastos a la vez y `category_id` no choca.
+    user = make_user(session)
+    doomed, kept = make_space(session, "Casa"), make_space(session, "Viajes")
+    make_expense(session, doomed, user)
+    kept_expense = make_expense(session, kept, user)
+
+    session.execute(delete(Space).where(Space.id == doomed.id))
+    session.flush()
+
+    assert session.scalars(select(Expense.id)).all() == [kept_expense.id]
+    assert session.scalars(select(Category.space_id)).all() == [kept.id]

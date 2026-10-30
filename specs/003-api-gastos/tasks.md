@@ -24,7 +24,7 @@ arrancar nombrando la variable.
   verde.
 - RF: base de RF-2, RF-6, RF-9, RF-10 y RF-11; principio 7.
 
-## [ ] T2 — Modelo `Expense`
+## [x] T2 — Modelo `Expense`
 `app/models.py`: la tabla `expenses` como la describe el plan
 (`space_id` con `ON DELETE CASCADE`, `category_id` sin `ON DELETE`,
 `created_by`, `amount` `BigInteger`, `payment_type`, `spent_on` `Date`,

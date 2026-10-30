@@ -1,11 +1,16 @@
-"""Tablas de usuarios, espacios, membresías, invitaciones, sesiones y categorías."""
+"""Tablas de usuarios, espacios, membresías, invitaciones, sesiones, categorías
+y gastos."""
 
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
+    Index,
     String,
     TypeDecorator,
     UniqueConstraint,
@@ -147,3 +152,37 @@ class Category(Base):
         columnas no pueden quedar desalineadas (plan 002)."""
         self.name_key = category_key(name)
         return name
+
+
+class Expense(Base):
+    __tablename__ = "expenses"
+    __table_args__ = (
+        # Última defensa si algo salta la validación de la API (RF-3, RF-4).
+        CheckConstraint("amount > 0", name="ck_expenses_amount_positive"),
+        CheckConstraint(
+            "payment_type IN ('credit', 'debit')", name="ck_expenses_payment_type"
+        ),
+        # El listado filtra por espacio y periodo (RF-9), igual que el
+        # resumen de la spec 004.
+        Index("ix_expenses_space_id_spent_on", "space_id", "spent_on"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    # Sin `ondelete` a propósito (plan 003): `NO ACTION` comprueba al final de
+    # la sentencia, así que borrar el espacio quita categorías y gastos a la
+    # vez sin chocar. `CASCADE` borraría gastos el día que se borren
+    # categorías (principio 8), y `RESTRICT`, que comprueba fila a fila,
+    # podría frenar el borrado del espacio.
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    # Salir del espacio solo borra la membresía: el gasto conserva su autor
+    # (RF-20).
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # Unidad mínima de la moneda (principio 6). El tope de un billón no cabe
+    # en un entero de 32 bits.
+    amount: Mapped[int] = mapped_column(BigInteger)
+    payment_type: Mapped[str] = mapped_column(String(6))
+    # Día calendario sin hora ni zona: "hoy" se calcula en `TZ` (ADR 0007).
+    spent_on: Mapped[date] = mapped_column(Date)
+    description: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
