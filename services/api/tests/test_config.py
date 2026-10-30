@@ -4,7 +4,12 @@ import sys
 
 import pytest
 
-from app.config import MissingSettingError, Settings, load_settings
+from app.config import (
+    InvalidSettingError,
+    MissingSettingError,
+    Settings,
+    load_settings,
+)
 
 VALID_ENV = {
     "DATABASE_URL": "sqlite://",
@@ -69,6 +74,21 @@ def test_settings_are_read_from_environment() -> None:
         tz="America/Bogota",
         web_base_url="http://localhost:8080",
     )
+
+
+@pytest.mark.parametrize("value", ["Marte/Olimpo", "../Marte"])
+def test_invalid_time_zone_is_named(value: str) -> None:
+    # Sin esta comprobación la API arrancaría y cada petición de gastos
+    # fallaría con 500 al calcular "hoy" (plan 003).
+    with pytest.raises(InvalidSettingError, match="TZ"):
+        load_settings({**VALID_ENV, "TZ": value})
+
+
+def test_import_fails_with_invalid_time_zone() -> None:
+    result = import_config_with({**VALID_ENV, "TZ": "Marte/Olimpo"})
+
+    assert result.returncode != 0
+    assert "TZ" in result.stderr
 
 
 @pytest.mark.parametrize("value", ["http://localhost:8080/", "http://localhost:8080//"])

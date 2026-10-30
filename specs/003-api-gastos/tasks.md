@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — Reloj, periodos y `TZ` válida
+## [x] T1 — Reloj, periodos y `TZ` válida
 `app/dates.py` con `now()`, `today()`, `period_of()` y `period_bounds()`.
 `config.py` comprueba que `ZoneInfo(TZ)` funcione y, si no, falla al
 arrancar nombrando la variable.
