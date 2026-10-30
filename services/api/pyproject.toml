@@ -1,7 +1,7 @@
 [project]
-name = "budget-ops-api"
+name = "cuentas-claras-api"
 version = "0.1.0"
-description = "API de budget-ops: usuarios, espacios y presupuesto."
+description = "API de cuentas-claras: usuarios, espacios y presupuesto."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",

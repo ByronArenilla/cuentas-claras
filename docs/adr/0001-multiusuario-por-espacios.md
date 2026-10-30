@@ -6,7 +6,7 @@
 
 ## Contexto
 
-La constitución fija en el principio 5 que budget-ops es de **un solo
+La constitución fija en el principio 5 que cuentas-claras es de **un solo
 usuario**, sin registro de cuentas ni multiusuario, y el principio 13
 restringe el acceso a un único `chat_id` de Telegram más una web
 autenticada. Toda la fase 1 del roadmap (specs 001 a 007) está escrita

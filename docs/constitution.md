@@ -1,4 +1,4 @@
-# Constitución — budget-ops
+# Constitución — cuentas-claras
 
 Principios innegociables para todo el proyecto, de la fase 1 a la 9. Toda
 spec, plan, tarea y cambio de infraestructura debe cumplirlos. Solo se

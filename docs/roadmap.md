@@ -1,4 +1,4 @@
-# Roadmap — budget-ops
+# Roadmap — cuentas-claras
 
 > **Fase actual:** 1 — Aplicación y SDD
 > **Spec activa:** 003-api-gastos

@@ -1,4 +1,4 @@
-# budget-ops
+# cuentas-claras
 
 App para controlar el presupuesto mensual, en solitario o compartido con
 otras personas: los gastos se registran conversando con un bot de Telegram y
