@@ -87,7 +87,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan sin red.
 - RF: RF-13, RF-17, RF-28.
 
-## [ ] T7 — Cliente de la API
+## [x] T7 — Cliente de la API
 `bot/api.py` con `ApiClient` y sus errores.
 
 - Test primero (`test_api.py`, con `httpx.MockTransport`):
