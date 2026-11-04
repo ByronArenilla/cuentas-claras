@@ -537,3 +537,300 @@ def test_conversations_of_two_chats_do_not_mix() -> None:
     replies = send(bot, Text("comida"), chat_id=2)
 
     assert "/gasto" in text_of(replies)  # El chat 2 no tiene borrador.
+
+
+# --- /resumen (spec 006, T4) ---
+
+
+def empty_summary(period: str) -> dict:
+    return {
+        "period": period,
+        "categories": [
+            {
+                "category_id": 2,
+                "name": "Comida",
+                "budget": 400_000,
+                "spent": 0,
+                "remaining": 400_000,
+            }
+        ],
+        "total": {"budget": 400_000, "spent": 0, "remaining": 400_000},
+    }
+
+
+def summaries_for(space_ids: list[int], periods: list[str]) -> dict:
+    return {(s, p): empty_summary(p) for s in space_ids for p in periods}
+
+
+def test_summary_of_the_current_month_in_tz() -> None:
+    # RF-5: con el reloj fijado, en Bogotá todavía es octubre.
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-10"])
+
+    replies = send(make(api), Command("resumen"))
+
+    assert api.summary_requests == [(1, "2026-10")]
+    assert text_of(replies).startswith("Personal · octubre de 2026")
+    assert labels(replies[-1]) == ["‹ septiembre", "noviembre ›"]
+
+
+def test_with_two_spaces_summary_asks_the_space_first() -> None:
+    # Criterio 4 de la 006 (decisión 5).
+    api = FakeApi(spaces=TWO_SPACES)
+    api.summaries = summaries_for([2], ["2026-10"])
+    bot = make(api)
+
+    replies = send(bot, Command("resumen"))
+
+    assert labels(replies[-1]) == ["Personal", "Casa"]
+    assert api.summary_requests == []
+    replies = press(bot, replies, "Casa")
+    assert api.summary_requests == [(2, "2026-10")]
+    assert text_of(replies).startswith("Casa · octubre de 2026")
+
+
+def test_summary_buttons_move_month_by_month() -> None:
+    # Criterio 3 de la 006 (RF-8), también cruzando de año.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.summaries = summaries_for([2], ["2026-10", "2026-09", "2026-11"])
+    bot = make(api)
+    october = press(bot, send(bot, Command("resumen")), "Casa")
+
+    september = press(bot, october, "‹ septiembre")
+    november = press(bot, october, "noviembre ›")
+
+    assert api.summary_requests[-2:] == [(2, "2026-09"), (2, "2026-11")]
+    assert text_of(september).startswith("Casa · septiembre de 2026")
+    assert labels(november[-1]) == ["‹ octubre", "diciembre ›"]
+
+    api.summaries = summaries_for([2], ["2026-01", "2025-12"])
+    january = send(bot, Press("sum:2:2026-01"))
+    assert labels(january[-1]) == ["‹ diciembre", "febrero ›"]
+    press(bot, january, "‹ diciembre")
+    assert api.summary_requests[-1] == (2, "2025-12")
+
+
+def test_summary_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # Criterio 7 de la 006 (RF-18).
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-10", "2026-09"])
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    summary = send(bot, Command("resumen"))
+    press(bot, summary, "‹ septiembre")
+    payments = press(bot, categories, "Comida")
+
+    assert labels(payments[-1]) == ["Débito", "Crédito"]
+
+
+def test_summary_buttons_work_without_any_state() -> None:
+    # RF-18, decisión 6: un botón de un resumen sirve en un bot recién
+    # arrancado, sin borrador ni conversación previa.
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-08"])
+
+    replies = send(make(api), Press("sum:1:2026-08"))
+
+    assert text_of(replies).startswith("Personal · agosto de 2026")
+
+
+@pytest.mark.parametrize("data", ["sum:x:2026-10", "sum:1", "sum:1:2026-13", "otra:1"])
+def test_malformed_query_buttons_change_nothing(data: str) -> None:
+    api = FakeApi()
+
+    replies = send(make(api), Press(data))
+
+    assert "ya terminó" in text_of(replies)
+    assert api.summary_requests == []
+
+
+# --- /ultimos (spec 006, T5) ---
+
+
+def expense(
+    expense_id: int,
+    amount: int,
+    created_by: int = 1,
+    created_at: str = "2026-10-31T15:00:00Z",
+    description: str | None = None,
+) -> dict:
+    return {
+        "id": expense_id,
+        "amount": amount,
+        "payment_type": "debit",
+        "category_id": 2,
+        "spent_on": "2026-10-30",
+        "description": description,
+        "created_by": created_by,
+        "created_at": created_at,
+    }
+
+
+def test_recent_with_one_space_lists_the_expenses() -> None:
+    # RF-9, RF-10 (criterio 5 de la 006).
+    api = FakeApi()
+    api.recent = {
+        1: [expense(2, 5_000, created_by=7), expense(1, 20_000, description="Mercado")]
+    }
+
+    replies = send(make(api), Command("ultimos"))
+
+    assert text_of(replies).split("\n") == [
+        "Últimos gastos registrados en Personal:",
+        "",
+        "1. $ 5.000 · Comida · ayer, 30 de octubre · de otro miembro",
+        "2. $ 20.000 · Comida · ayer, 30 de octubre · Mercado",
+    ]
+
+
+def test_recent_of_an_empty_space_says_so() -> None:
+    # RF-11.
+    replies = send(make(FakeApi()), Command("ultimos"))
+
+    assert text_of(replies) == "Todavía no hay gastos registrados en Personal."
+
+
+def test_with_two_spaces_recent_asks_the_space_first() -> None:
+    # Criterio 4 de la 006.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.recent = {2: [expense(1, 20_000)]}
+    bot = make(api)
+
+    replies = send(bot, Command("ultimos"))
+
+    assert labels(replies[-1]) == ["Personal", "Casa"]
+    assert "recent_expenses" not in api.calls
+    assert "en Casa" in text_of(press(bot, replies, "Casa"))
+
+
+def test_recent_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # RF-18.
+    api = FakeApi()
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    send(bot, Command("ultimos"))
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+# --- /deshacer (spec 006, T6) ---
+
+
+def test_undo_proposes_my_latest_expense_across_spaces() -> None:
+    # Criterio 6 de la 006 (RF-12): el más reciente de cualquier espacio, y
+    # nunca el de otro miembro aunque sea más nuevo.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.recent = {
+        1: [expense(1, 20_000, created_at="2026-10-31T10:00:00Z")],
+        2: [
+            expense(5, 99_000, created_by=7, created_at="2026-10-31T23:00:00Z"),
+            expense(4, 8_000, created_at="2026-10-31T12:00:00Z", description="Taxi"),
+        ],
+    }
+
+    replies = send(make(api), Command("deshacer"))
+
+    text = text_of(replies)
+    assert "¿Borro este gasto?" in text
+    assert "$ 8.000 · Comida · ayer, 30 de octubre · Taxi" in text
+    assert "Espacio: Casa" in text
+    assert labels(replies[-1]) == ["Borrar", "Cancelar"]
+    # RF-14: todavía no se borró nada.
+    assert "delete_expense" not in api.calls
+
+
+def test_undo_cancel_deletes_nothing() -> None:
+    # RF-16.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000)]}
+    bot = make(api)
+
+    replies = press(bot, send(bot, Command("deshacer")), "Cancelar")
+
+    assert "No borré nada" in text_of(replies)
+    assert api.deleted == []
+
+
+def test_undo_deletes_only_that_expense_and_only_once() -> None:
+    # Criterio 6 (RF-15).
+    api = FakeApi()
+    api.recent = {1: [expense(2, 5_000), expense(1, 20_000)]}
+    bot = make(api)
+    proposal = send(bot, Command("deshacer"))
+
+    first = press(bot, proposal, "Borrar")
+    second = press(bot, proposal, "Borrar")
+
+    assert "borré el gasto" in text_of(first)
+    assert api.deleted == [(1, 2)]
+    assert "ya no existe" in text_of(second)
+    assert api.deleted == [(1, 2)]
+
+
+def test_undo_without_own_expenses_says_there_is_nothing() -> None:
+    # RF-13: los gastos de otros miembros no cuentan.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000, created_by=7)]}
+
+    replies = send(make(api), Command("deshacer"))
+
+    assert "No tienes gastos que deshacer" in text_of(replies)
+    assert replies[-1].buttons == ()
+
+
+def test_undo_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # RF-18.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000)]}
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    press(bot, send(bot, Command("deshacer")), "Cancelar")
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+# --- Comunes de la 006 (T7) ---
+
+
+@pytest.mark.parametrize("name", ["resumen", "ultimos", "deshacer"])
+def test_queries_in_an_unlinked_chat_explain_how_to_link(name: str) -> None:
+    # Criterio 8 de la 006 (RF-17).
+    api = FakeApi(linked=False)
+
+    replies = send(make(api), Command(name))
+
+    assert "no está vinculado" in text_of(replies)
+    assert set(api.calls) <= {"spaces"}  # Corta en la primera llamada.
+
+
+@pytest.mark.parametrize("name", ["resumen", "ultimos", "deshacer"])
+def test_queries_with_the_api_down_say_so(name: str) -> None:
+    # RF-19.
+    api = FakeApi()
+    api.down = True
+
+    assert "No pude hablar con gastito" in text_of(send(make(api), Command(name)))
+
+
+def test_a_query_with_the_api_down_keeps_the_draft() -> None:
+    # RF-18 también cuando la consulta falla.
+    api = FakeApi()
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    api.down = True
+    send(bot, Command("resumen"))
+    api.down = False
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+def test_help_names_the_query_commands() -> None:
+    # RF-20.
+    text = text_of(send(make(FakeApi()), Command("ayuda")))
+
+    for command in ("/resumen", "/ultimos", "/deshacer"):
+        assert command in text

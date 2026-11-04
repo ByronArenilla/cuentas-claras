@@ -16,8 +16,29 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from bot.api import ApiError, ApiRejected, ApiUnavailable, InvalidCode, NotLinked
-from bot.parsing import format_day, format_money, month_name, parse_amount, parse_day
+from bot.api import (
+    ApiError,
+    ApiRejected,
+    ApiUnavailable,
+    InvalidCode,
+    NotFound,
+    NotLinked,
+)
+from bot.parsing import (
+    format_day,
+    format_money,
+    month_name,
+    parse_amount,
+    parse_day,
+    shift_period,
+)
+from bot.views import (
+    UNKNOWN_CATEGORY,
+    expense_text,
+    recent_text,
+    remaining_text,
+    summary_text,
+)
 
 # Un borrador sin respuesta durante este tiempo se descarta (decisión 8).
 DRAFT_TTL = timedelta(minutes=10)
@@ -91,6 +112,9 @@ HELP = (
     "/gasto: registrar un gasto. También puedes escribir solo el monto, "
     "por ejemplo 20.000.\n"
     "/cancelar: descartar el gasto que estás registrando.\n"
+    "/resumen: cómo vas este mes frente al presupuesto.\n"
+    "/ultimos: los últimos gastos registrados.\n"
+    "/deshacer: borrar el último gasto que registraste.\n"
     "/vincular CÓDIGO: vincular este chat a tu cuenta de gastito.\n"
     "/desvincular: quitar la vinculación de este chat."
 )
@@ -135,6 +159,17 @@ EXPIRED = (
     "El gasto que estabas registrando caducó tras 10 minutos sin respuesta. "
     "No registré nada."
 )
+ASK_SPACE_FOR_SUMMARY = "¿De qué espacio quieres el resumen?"
+ASK_SPACE_FOR_RECENT = "¿De qué espacio quieres ver los últimos gastos?"
+NOTHING_TO_UNDO = "No tienes gastos que deshacer: todavía no has registrado ninguno."
+UNDO_DONE = "Listo, borré el gasto."
+UNDO_GONE = "Ese gasto ya no existe: quizá ya lo borraste o lo borró otro miembro."
+UNDO_CANCELLED = "Cancelado. No borré nada."
+QUERY_COMMANDS = ("resumen", "ultimos", "deshacer")
+# Botones de consulta: llevan todo lo que necesitan y no dependen del
+# borrador (decisión 6 de la 006).
+QUERY_PREFIXES = ("sum", "last", "undo")
+
 SAVE_UNAVAILABLE = (
     "No pude registrar el gasto porque gastito no responde. Toca Confirmar "
     "para intentarlo de nuevo o Cancelar para descartarlo."
@@ -211,10 +246,15 @@ class Conversations:
             self._drafts.pop(chat_id, None)
             replies.append(Reply(LINK_HELP))
         except ApiUnavailable:
-            # Fuera de la confirmación, que lo maneja aparte (RF-25), se
-            # descarta el borrador: no se registró nada.
-            self._drafts.pop(chat_id, None)
+            # En el registro, fuera de la confirmación (que lo maneja aparte,
+            # RF-25), se descarta el borrador: no se registró nada. Una
+            # consulta nunca toca el borrador (RF-18 de la 006).
+            if not is_query(event):
+                self._drafts.pop(chat_id, None)
             replies.append(Reply(UNAVAILABLE))
+        except ApiRejected as error:
+            # Por ejemplo, un espacio del que el usuario ya salió.
+            replies.append(Reply(f"No pude completarlo: {error.detail}"))
 
         if chat_id in self._drafts:
             self._drafts[chat_id].touched_at = self.clock()
@@ -232,6 +272,12 @@ class Conversations:
     async def _command(self, chat_id: int, command: Command) -> list[Reply]:
         if command.name in ("start", "ayuda"):
             return await self._help(chat_id)
+        if command.name == "resumen":
+            return await self._summary_start(chat_id)
+        if command.name == "ultimos":
+            return await self._recent_start(chat_id)
+        if command.name == "deshacer":
+            return await self._undo_start(chat_id)
         if command.name == "gasto":
             # RF-26: con un borrador en curso, `/gasto` empieza otro.
             self._drafts.pop(chat_id, None)
@@ -292,6 +338,9 @@ class Conversations:
     # --- Botones ---
 
     async def _press(self, chat_id: int, data: str) -> list[Reply]:
+        if is_query(Press(data)):
+            # Antes de mirar el borrador: estos botones no lo tocan (RF-18).
+            return await self._query_press(chat_id, data)
         draft = self._drafts.get(chat_id)
         number, _, rest = data.partition(":")
         step, _, value = rest.partition(":")
@@ -516,6 +565,156 @@ class Conversations:
         if row["budget"] is None:
             return f"{name}: llevas {spent} en {month}. No tiene presupuesto."
         line = f"{name}: llevas {spent} de {format_money(row['budget'])} en {month}."
-        if row["remaining"] < 0:
-            return f"{line} Te pasaste por {format_money(-row['remaining'])}."
-        return f"{line} Te quedan {format_money(row['remaining'])}."
+        return f"{line} {remaining_text(row['remaining'])}"
+
+    # --- Consultas (spec 006) ---
+
+    def current_period(self) -> str:
+        """El mes actual en `TZ`, como `AAAA-MM` (principio 7)."""
+        today = self.today()
+        return f"{today.year:04d}-{today.month:02d}"
+
+    async def _query_press(self, chat_id: int, data: str) -> list[Reply]:
+        """Botones sin estado: `sum:<espacio>:<mes>`, `last:<espacio>`,
+        `undo:<espacio>:<gasto>` y `undo:no`. Un dato mal formado no hace
+        nada."""
+        kind, _, rest = data.partition(":")
+        parts = rest.split(":")
+        try:
+            if kind == "sum" and len(parts) == 2 and is_period(parts[1]):
+                return await self._show_summary(chat_id, int(parts[0]), parts[1])
+            if kind == "last" and len(parts) == 1:
+                return await self._show_recent(chat_id, int(parts[0]))
+            if kind == "undo" and parts == ["no"]:
+                return [Reply(UNDO_CANCELLED)]  # RF-16.
+            if kind == "undo" and len(parts) == 2:
+                return await self._undo(chat_id, int(parts[0]), int(parts[1]))
+        except ValueError:
+            pass
+        return [Reply(STALE)]
+
+    async def _space_name(self, chat_id: int, space_id: int) -> str:
+        """El nombre del espacio, que el botón no lleva para no pasar de los
+        64 bytes de `callback_data`."""
+        spaces = await self.api.spaces(chat_id)
+        return next((s["name"] for s in spaces if s["id"] == space_id), "Espacio")
+
+    async def _summary_start(self, chat_id: int) -> list[Reply]:
+        """`/resumen`: el mes actual del único espacio, o los botones para
+        elegirlo (RF-5, decisión 5)."""
+        spaces = await self.api.spaces(chat_id)
+        if not spaces:
+            return [Reply(NO_SPACES)]
+        period = self.current_period()
+        if len(spaces) == 1:
+            return await self._show_summary(chat_id, spaces[0]["id"], period)
+        buttons = tuple(
+            (Button(space["name"], f"sum:{space['id']}:{period}"),) for space in spaces
+        )
+        return [Reply(ASK_SPACE_FOR_SUMMARY, buttons)]
+
+    async def _show_summary(
+        self, chat_id: int, space_id: int, period: str
+    ) -> list[Reply]:
+        """El resumen del mes con ‹ y › para moverse (RF-6 a RF-8)."""
+        name = await self._space_name(chat_id, space_id)
+        summary = await self.api.summary(chat_id, space_id, period)
+        before, after = shift_period(period, -1), shift_period(period, 1)
+        buttons = (
+            (
+                Button(f"‹ {month_name(int(before[5:7]))}", f"sum:{space_id}:{before}"),
+                Button(f"{month_name(int(after[5:7]))} ›", f"sum:{space_id}:{after}"),
+            ),
+        )
+        return [Reply(summary_text(name, summary), buttons)]
+
+    async def _recent_start(self, chat_id: int) -> list[Reply]:
+        """`/ultimos`: la lista del único espacio, o los botones para elegirlo
+        (RF-9, decisión 5)."""
+        spaces = await self.api.spaces(chat_id)
+        if not spaces:
+            return [Reply(NO_SPACES)]
+        if len(spaces) == 1:
+            return await self._show_recent(chat_id, spaces[0]["id"])
+        buttons = tuple(
+            (Button(space["name"], f"last:{space['id']}"),) for space in spaces
+        )
+        return [Reply(ASK_SPACE_FOR_RECENT, buttons)]
+
+    async def _show_recent(self, chat_id: int, space_id: int) -> list[Reply]:
+        """Los cinco últimos registrados, marcando los de otro miembro
+        (RF-9 a RF-11, decisiones 1 y 7)."""
+        name = await self._space_name(chat_id, space_id)
+        expenses = await self.api.recent_expenses(chat_id, space_id)
+        categories = await self.api.categories(chat_id, space_id)
+        me = await self.api.me(chat_id)
+        names = {c["id"]: c["name"] for c in categories}
+        return [Reply(recent_text(name, expenses, names, me["id"], self.today()))]
+
+    async def _undo_start(self, chat_id: int) -> list[Reply]:
+        """`/deshacer`: el último gasto propio entre todos los espacios, con
+        Borrar y Cancelar. Todavía no se borra nada (RF-12 a RF-14).
+
+        Se pide `recent?limit=1&mine=true` a cada espacio: así toda consulta
+        sigue filtrada por espacio (plan 006).
+        """
+        spaces = await self.api.spaces(chat_id)
+        latest: tuple[datetime, dict, dict] | None = None
+        for space in spaces:
+            found = await self.api.recent_expenses(chat_id, space["id"], 1, True)
+            for expense in found:
+                created_at = datetime.fromisoformat(expense["created_at"])
+                if latest is None or created_at > latest[0]:
+                    latest = (created_at, space, expense)
+        if latest is None:
+            return [Reply(NOTHING_TO_UNDO)]
+
+        _, space, expense = latest
+        categories = await self.api.categories(chat_id, space["id"])
+        name = next(
+            (c["name"] for c in categories if c["id"] == expense["category_id"]),
+            UNKNOWN_CATEGORY,
+        )
+        text = (
+            "¿Borro este gasto?\n\n"
+            f"{expense_text(expense, name, self.today())}\n"
+            f"Espacio: {space['name']}"
+        )
+        buttons = (
+            (
+                Button("Borrar", f"undo:{space['id']}:{expense['id']}"),
+                Button("Cancelar", "undo:no"),
+            ),
+        )
+        return [Reply(text, buttons)]
+
+    async def _undo(self, chat_id: int, space_id: int, expense_id: int) -> list[Reply]:
+        """Borra el gasto del botón, y solo ese. Repetir el botón no borra
+        otro: el segundo intento recibe `404` (RF-15)."""
+        try:
+            await self.api.delete_expense(chat_id, space_id, expense_id)
+        except NotFound:
+            return [Reply(UNDO_GONE)]
+        return [Reply(UNDO_DONE)]
+
+
+def is_period(text: str) -> bool:
+    """Si el texto es un mes `AAAA-MM` válido."""
+    return (
+        len(text) == 7
+        and text[4] == "-"
+        and text[:4].isascii()
+        and text[:4].isdigit()
+        and text[5:].isascii()
+        and text[5:].isdigit()
+        and 1 <= int(text[5:]) <= 12
+    )
+
+
+def is_query(event: Event) -> bool:
+    """Si el evento es una consulta de la 006, que no toca el borrador."""
+    if isinstance(event, Command):
+        return event.name in QUERY_COMMANDS
+    if isinstance(event, Press):
+        return event.data.partition(":")[0] in QUERY_PREFIXES
+    return False

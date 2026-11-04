@@ -78,3 +78,12 @@ def format_day(day: date, today: date) -> str:
     if day == today - timedelta(days=1):
         return f"ayer, {text}"
     return text if day.year == today.year else f"{text} de {day.year}"
+
+
+def shift_period(period: str, months: int) -> str:
+    """El periodo `AAAA-MM` movido `months` meses, hacia atrás si es
+    negativo: `shift_period("2026-01", -1) == "2025-12"` (RF-8 de la 006)."""
+    year, month = int(period[:4]), int(period[5:7])
+    # Contar meses desde el año 0 hace que cruzar de año sea una división.
+    index = year * 12 + (month - 1) + months
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"

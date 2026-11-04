@@ -508,3 +508,21 @@ def test_budgets_stay_when_a_member_leaves(
 
     assert response.status_code == 204
     assert summary_total(client, ana, space_id)["budget"] == 400_000
+
+
+@pytest.mark.usefixtures("october")
+def test_recent_expenses_never_cross_spaces(client: TestClient, login: Login) -> None:
+    # RF-4 de la 006: ni por la ruta ajena, ni mezclando espacios propios.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    ana_space, bea_space = personal(client, ana), personal(client, bea)
+    casa = create_space(client, ana, "Casa")
+    ana_expense = add_expense(client, ana, ana_space)
+    add_expense(client, ana, casa)
+    add_expense(client, bea, bea_space)
+
+    foreign = client.get(f"/spaces/{bea_space}/expenses/recent", headers=ana)
+    own = client.get(f"/spaces/{ana_space}/expenses/recent", headers=ana)
+
+    assert foreign.status_code == 404
+    assert foreign.json()["detail"] == "Espacio no encontrado."
+    assert own.json() == [ana_expense]

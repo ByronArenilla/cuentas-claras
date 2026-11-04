@@ -1,4 +1,5 @@
-"""Gastos de un espacio: registrar, consultar, listar, editar y borrar (spec 003).
+"""Gastos de un espacio: registrar, consultar, listar, editar y borrar (spec 003),
+y los últimos registrados (spec 006).
 
 Las rutas reciben el espacio por `member_space`, nunca consultando por
 `space_id` directamente (RF-19; RF-28 y RF-29 de la 001).
@@ -6,7 +7,7 @@ Las rutas reciben el espacio por `member_space`, nunca consultando por
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -100,6 +101,28 @@ def list_expenses(
             Expense.spent_on < end,
         )
         .order_by(Expense.spent_on.desc(), Expense.id.desc())
+    )
+    return [ExpenseOut.model_validate(expense) for expense in expenses]
+
+
+# Antes que `/{expense_id}`: Starlette prueba las rutas en orden y, si no,
+# tomaría `recent` como identificador de un gasto (plan 006).
+@router.get("/recent")
+def recent_expenses(
+    space: Annotated[Space, Depends(member_space)],
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    mine: bool = False,
+) -> list[ExpenseOut]:
+    """Últimos gastos registrados en el espacio, de cualquier periodo, del
+    registrado más recientemente al más antiguo (RF-1 de la 006). Con
+    `mine=true`, solo los de quien llama (RF-2 de la 006)."""
+    query = select(Expense).where(Expense.space_id == space.id)
+    if mine:
+        query = query.where(Expense.created_by == user.id)
+    expenses = db.scalars(
+        query.order_by(Expense.created_at.desc(), Expense.id.desc()).limit(limit)
     )
     return [ExpenseOut.model_validate(expense) for expense in expenses]
 

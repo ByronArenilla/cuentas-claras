@@ -7,7 +7,14 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from bot.api import ApiClient, ApiRejected, ApiUnavailable, InvalidCode, NotLinked
+from bot.api import (
+    ApiClient,
+    ApiRejected,
+    ApiUnavailable,
+    InvalidCode,
+    NotFound,
+    NotLinked,
+)
 
 KEY = "k" * 32
 CHAT = 42
@@ -316,3 +323,78 @@ def test_is_linked_only_asks_for_a_session(status: int, linked: bool) -> None:
 
     assert run(client_for(fake).is_linked(CHAT)) is linked
     assert fake.paths() == ["POST /telegram/sessions"]
+
+
+# --- Rutas de la 006 (T2) ---
+
+
+def test_recent_expenses_sends_limit_and_mine() -> None:
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply(),
+            ("GET", "/spaces/3/expenses/recent"): reply(200, [{"id": 9}]),
+        }
+    )
+
+    expenses = run(client_for(fake).recent_expenses(CHAT, 3, limit=1, mine=True))
+
+    assert expenses == [{"id": 9}]
+    params = fake.requests[-1].url.params
+    assert (params["limit"], params["mine"]) == ("1", "true")
+
+
+def test_recent_expenses_defaults_to_five_of_anyone() -> None:
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply(),
+            ("GET", "/spaces/3/expenses/recent"): reply(200, []),
+        }
+    )
+
+    run(client_for(fake).recent_expenses(CHAT, 3))
+
+    params = fake.requests[-1].url.params
+    assert (params["limit"], params["mine"]) == ("5", "false")
+
+
+def test_delete_expense_confirms_explicitly() -> None:
+    # Principio 8: el borrado solo sale con `confirm=true`.
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply(),
+            ("DELETE", "/spaces/3/expenses/9"): reply(204),
+        }
+    )
+
+    run(client_for(fake).delete_expense(CHAT, 3, 9))
+
+    assert fake.requests[-1].url.params["confirm"] == "true"
+
+
+def test_a_missing_expense_is_not_found() -> None:
+    # RF-15 de la 006: "ese gasto ya no existe".
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply(),
+            ("DELETE", "/spaces/3/expenses/9"): reply(
+                404, {"detail": "Gasto no encontrado."}
+            ),
+        }
+    )
+
+    with pytest.raises(NotFound) as error:
+        run(client_for(fake).delete_expense(CHAT, 3, 9))
+    # Sigue siendo un rechazo de la API, con su mensaje.
+    assert isinstance(error.value, ApiRejected)
+    assert error.value.detail == "Gasto no encontrado."
+
+
+def test_me_returns_the_user_of_the_chat() -> None:
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply(),
+            ("GET", "/me"): reply(200, {"id": 1, "email": "ana@x.co"}),
+        }
+    )
+
+    assert run(client_for(fake).me(CHAT)) == {"id": 1, "email": "ana@x.co"}

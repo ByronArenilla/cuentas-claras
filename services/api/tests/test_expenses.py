@@ -812,3 +812,119 @@ def test_a_member_deletes_an_expense_registered_by_another(
 
     assert response.status_code == 204
     assert listed(client, ana, space_id, period="2026-10") == []
+
+
+# --- Últimos registrados (spec 006, T1) ---
+
+
+def register(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    category_id: int,
+    amount: int,
+    spent_on: str = "2026-11-01",
+) -> int:
+    body = {
+        "amount": amount,
+        "payment_type": "debit",
+        "category_id": category_id,
+        "spent_on": spent_on,
+    }
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=headers)
+    response.raise_for_status()
+    return response.json()["id"]
+
+
+def recent(
+    client: TestClient, headers: dict[str, str], space_id: int, **params: object
+) -> list[dict]:
+    response = client.get(
+        f"/spaces/{space_id}/expenses/recent", params=params, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_recent_orders_by_registration_not_by_date(
+    client: TestClient,
+    engine: Engine,
+    shared_space: tuple[int, dict[str, str], dict[str, str]],
+) -> None:
+    # Criterio 1 de la 006 (RF-1): de cualquier mes y de cualquier miembro,
+    # por momento de registro. El de septiembre tiene el `id` más bajo pero
+    # se registró al final: el orden es por `created_at`, no por `id`.
+    space_id, ana, bea = shared_space
+    category_id = first_category(client, ana, space_id)
+    september = register(client, ana, space_id, category_id, 1, "2026-09-10")
+    others = [
+        register(client, headers, space_id, category_id, amount)
+        for amount, headers in zip(range(2, 8), [ana, bea] * 3, strict=True)
+    ]
+    with Session(engine) as db:
+        expense = db.get_one(Expense, september)
+        expense.created_at = datetime(2030, 1, 1, tzinfo=UTC)
+        db.commit()
+
+    ids = [expense["id"] for expense in recent(client, ana, space_id)]
+
+    assert ids == [september, *reversed(others)][:5]
+
+
+def test_recent_respects_the_limit(client: TestClient, ana_space: AnaSpace) -> None:
+    space_id, category_id, ana = ana_space
+    for amount in (1, 2, 3):
+        register(client, ana, space_id, category_id, amount)
+
+    assert [e["amount"] for e in recent(client, ana, space_id, limit=2)] == [3, 2]
+
+
+@pytest.mark.parametrize("limit", [0, 21, "muchos"])
+def test_recent_rejects_a_limit_out_of_range(
+    client: TestClient, ana_space: AnaSpace, limit: object
+) -> None:
+    # RF-3.
+    space_id, _, ana = ana_space
+
+    response = client.get(
+        f"/spaces/{space_id}/expenses/recent", params={"limit": limit}, headers=ana
+    )
+
+    assert response.status_code == 422
+
+
+def test_recent_mine_only_returns_my_expenses(
+    client: TestClient, shared_space: tuple[int, dict[str, str], dict[str, str]]
+) -> None:
+    # RF-2: lo que necesita `/deshacer`.
+    space_id, ana, bea = shared_space
+    category_id = first_category(client, ana, space_id)
+    mine = register(client, ana, space_id, category_id, 1)
+    register(client, bea, space_id, category_id, 2)
+
+    assert [e["id"] for e in recent(client, ana, space_id, mine="true")] == [mine]
+    assert len(recent(client, ana, space_id)) == 2
+
+
+def test_recent_returns_the_expense_shape(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    space_id, category_id, ana = ana_space
+    register(client, ana, space_id, category_id, 1)
+
+    [expense] = recent(client, ana, space_id)
+
+    assert set(expense) == set(ExpenseOut.model_fields)
+
+
+def test_reading_one_expense_still_works_next_to_recent(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # `/recent` va antes que `/{expense_id}` (plan 006): las dos conviven.
+    space_id, category_id, ana = ana_space
+    expense_id = register(client, ana, space_id, category_id, 1)
+
+    response = client.get(f"/spaces/{space_id}/expenses/{expense_id}", headers=ana)
+
+    assert response.status_code == 200
+    assert response.json()["id"] == expense_id

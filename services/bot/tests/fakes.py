@@ -1,6 +1,6 @@
 """API falsa en memoria para probar la conversación sin red ni Telegram."""
 
-from bot.api import ApiUnavailable, InvalidCode, NotLinked
+from bot.api import ApiUnavailable, InvalidCode, NotFound, NotLinked
 
 VALID_CODE = "ABCD-EFGH"
 EMAIL = "ana@example.com"
@@ -27,11 +27,21 @@ class FakeApi:
         self.expenses: list[tuple[int, dict]] = []
         self.summary_reply: dict | Exception | None = None
         self.create_error: Exception | None = None
+        # Spec 006: resúmenes por (espacio, mes), últimos gastos por espacio
+        # (del más reciente al más antiguo) y gastos borrados.
+        self.summaries: dict[tuple[int, str], dict] = {}
+        self.summary_requests: list[tuple[int, str]] = []
+        self.recent: dict[int, list[dict]] = {}
+        self.deleted: list[tuple[int, int]] = []
+        self.me_id = 1
+        self.down = False
 
     def _data(self, name: str) -> None:
         self.calls.append(name)
         if not self.linked:
             raise NotLinked("Este chat no está vinculado.")
+        if self.down:
+            raise ApiUnavailable("caída")
 
     async def is_linked(self, chat_id: int) -> bool:
         self.calls.append("is_linked")
@@ -66,8 +76,36 @@ class FakeApi:
 
     async def summary(self, chat_id: int, space_id: int, period: str) -> dict:
         self._data("summary")
+        self.summary_requests.append((space_id, period))
         if isinstance(self.summary_reply, Exception):
             raise self.summary_reply
-        if self.summary_reply is None:
-            raise ApiUnavailable("sin resumen")
-        return self.summary_reply
+        if self.summary_reply is not None:
+            return self.summary_reply
+        if (space_id, period) in self.summaries:
+            return self.summaries[(space_id, period)]
+        raise ApiUnavailable("sin resumen")
+
+    async def me(self, chat_id: int) -> dict:
+        self._data("me")
+        return {"id": self.me_id, "email": EMAIL}
+
+    async def recent_expenses(
+        self, chat_id: int, space_id: int, limit: int = 5, mine: bool = False
+    ) -> list[dict]:
+        self._data("recent_expenses")
+        expenses = [
+            e
+            for e in self.recent.get(space_id, [])
+            if (space_id, e["id"]) not in self.deleted
+            and (not mine or e["created_by"] == self.me_id)
+        ]
+        return expenses[:limit]
+
+    async def delete_expense(
+        self, chat_id: int, space_id: int, expense_id: int
+    ) -> None:
+        self._data("delete_expense")
+        exists = any(e["id"] == expense_id for e in self.recent.get(space_id, []))
+        if not exists or (space_id, expense_id) in self.deleted:
+            raise NotFound("Gasto no encontrado.")
+        self.deleted.append((space_id, expense_id))

@@ -5,7 +5,9 @@ Solo traduce: un mensaje o un botón de Telegram pasa a ser un evento de
 vive aquí (principio 10).
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import logging
+
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatType
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -21,7 +23,32 @@ from bot.api import ApiClient
 from bot.config import Settings
 from bot.conversation import Command, Conversations, Event, Press, Reply, Text
 
-COMMANDS = ("start", "ayuda", "gasto", "cancelar", "vincular", "desvincular")
+COMMANDS = (
+    "start",
+    "ayuda",
+    "gasto",
+    "cancelar",
+    "resumen",
+    "ultimos",
+    "deshacer",
+    "vincular",
+    "desvincular",
+)
+
+# El menú que Telegram muestra al escribir `/` (decisión 8 de la 006). Sin
+# `start`, que Telegram ya ofrece con su propio botón.
+MENU = (
+    ("gasto", "Registrar un gasto"),
+    ("resumen", "Cómo vas este mes frente al presupuesto"),
+    ("ultimos", "Los últimos gastos registrados"),
+    ("deshacer", "Borrar el último gasto que registraste"),
+    ("cancelar", "Descartar el gasto que estás registrando"),
+    ("vincular", "Vincular este chat con un código"),
+    ("desvincular", "Quitar la vinculación de este chat"),
+    ("ayuda", "Ver los comandos"),
+)
+
+log = logging.getLogger(__name__)
 
 # RF-8, decisión 6: en un grupo, cualquiera podría registrar a nombre del
 # usuario vinculado.
@@ -54,9 +81,19 @@ def build_application(settings: Settings) -> Application:
     async def close_api(_app: Application) -> None:
         await api.aclose()
 
+    async def register_menu(app: Application) -> None:
+        """Registra el menú de comandos al arrancar (principio 14): queda en
+        el código y no a mano en @BotFather. Si Telegram no responde, el bot
+        arranca igual."""
+        try:
+            await app.bot.set_my_commands([BotCommand(n, d) for n, d in MENU])
+        except TelegramError:
+            log.warning("No se pudo registrar el menú de comandos en Telegram.")
+
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
+        .post_init(register_menu)
         .post_shutdown(close_api)
         .build()
     )
