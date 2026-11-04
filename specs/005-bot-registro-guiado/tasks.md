@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — `BOT_API_KEY` en la API
+## [x] T1 — `BOT_API_KEY` en la API
 `config.py` exige `BOT_API_KEY` con 32 caracteres o más; `conftest.py` usa
 una llave de prueba; `.env.example` la documenta.
 
