@@ -86,22 +86,26 @@ está validada. Marca con [x] las specs terminadas.
 ## Fase 5 — AWS + Terraform
 - [ ] 016-cuenta-aws-segura
 - [ ] 017-infraestructura-aws
+- [ ] 018-https-dominio
+  - Se adelantó desde la fase 9 (2026-11-04). Sin HTTPS, el ícono fijado
+    en el celular abre la web en el navegador y no a pantalla completa
+    (ADR 0010). Además, con la app en internet, entrar sin HTTPS enviaría
+    la contraseña sin cifrar.
 
 ## Fase 6 — Ansible + despliegue continuo
-- [ ] 018-configuracion-servidores
-- [ ] 019-despliegue-continuo
+- [ ] 019-configuracion-servidores
+- [ ] 020-despliegue-continuo
 
 ## Fase 7 — Prometheus + Grafana
-- [ ] 020-metricas
-- [ ] 021-dashboards
-- [ ] 022-alertas
+- [ ] 021-metricas
+- [ ] 022-dashboards
+- [ ] 023-alertas
 
 ## Fase 8 — Kubernetes
-- [ ] 023-kubernetes-local
-- [ ] 024-kubernetes-k3s
-- [ ] 025-helm
+- [ ] 024-kubernetes-local
+- [ ] 025-kubernetes-k3s
+- [ ] 026-helm
 
 ## Fase 9 — Extras
-- [ ] 026-backups
-- [ ] 027-https-dominio
+- [ ] 027-backups
 - [ ] 028-gitops
