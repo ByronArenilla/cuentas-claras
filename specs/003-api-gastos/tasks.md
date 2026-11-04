@@ -159,7 +159,7 @@ gastos de mes.
 - Hecho cuando: el ADR existe y el plan lo cita.
 - RF: ninguno; principios 4 y 7.
 
-## [ ] T10 — Cierre: README y validación
+## [x] T10 — Cierre: README y validación
 - Comprobar que `make run-api` crea la tabla `expenses` en la base de datos
   local sin borrar los datos que ya tiene. Esta vez no se borra nada
   (plan, "Base de datos local").

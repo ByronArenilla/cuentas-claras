@@ -92,7 +92,7 @@ miembro, `DELETE /spaces/{id}?confirm=<nombre exacto>` lo borra con todos sus
 datos. Nadie puede quedarse sin ningún espacio.
 
 ## Categorías
-Cada gasto pertenecerá a una categoría, y cada espacio tiene las suyas.
+Cada gasto pertenece a una categoría, y cada espacio tiene las suyas.
 Todo espacio nuevo nace con siete predefinidas: Hogar, Comida, Transporte,
 Salud, Servicios, Ocio y Otros. Desde ese momento son del espacio, y
 cualquier miembro puede añadir más.
@@ -122,6 +122,66 @@ la categoría «Comida» en este espacio.". La ñ sí cuenta, así que "Año" y
 "Ano" pueden convivir. Otro espacio puede tener su propia "Comida". El
 porqué de esta comparación está en el
 [ADR 0006](docs/adr/0006-clave-normalizada-para-nombres-de-categoria.md).
+
+## Gastos
+Un gasto es dinero que ya salió. Tiene monto, tipo de pago (`credit` o
+`debit`), categoría del espacio, fecha y una descripción opcional. Cualquier
+miembro del espacio puede registrar, editar y borrar cualquier gasto, y cada
+gasto recuerda quién lo registró (`created_by`).
+
+- **Monto**: pesos enteros, sin decimales y sin moneda (`20000` son 20.000
+  pesos). Debe ser mayor que cero y como máximo un billón. `20000.5` o
+  `"20000"` se rechazan; nunca se redondean.
+- **Fecha** (`spent_on`): un día `AAAA-MM-DD`, no posterior a hoy. Si no se
+  envía, es hoy en la zona horaria `TZ`. Por qué es un día y no un instante:
+  [ADR 0007](docs/adr/0007-fecha-del-gasto-como-dia-calendario.md).
+- **Descripción**: hasta 200 caracteres. Vacía o solo con espacios cuenta
+  como ausente.
+
+**Registrar.** Responde `201` con el gasto. La categoría tiene que ser del
+mismo espacio.
+
+```sh
+curl -X POST localhost:8000/spaces/1/expenses \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' \
+  -d '{"amount": 20000, "payment_type": "debit", "category_id": 2, "description": "Mercado"}'
+# {"id": 1, "amount": 20000, "payment_type": "debit", "category_id": 2,
+#  "spent_on": "2026-11-04", "description": "Mercado", "created_by": 1,
+#  "created_at": "2026-11-04T20:00:05Z"}
+```
+
+**Listar por periodo.** Gastos de un mes `AAAA-MM`, del día más reciente al
+más antiguo. Sin `period`, el mes actual en `TZ`.
+
+```sh
+curl 'localhost:8000/spaces/1/expenses?period=2026-10' \
+  -H 'Authorization: Bearer <token de Ana>'
+# [{"id": 2, "amount": 85000, "spent_on": "2026-10-28", ...}]
+```
+
+`GET /spaces/1/expenses/1` devuelve un solo gasto. Un gasto que no existe o
+que es de otro espacio responde `404` "Gasto no encontrado.".
+
+**Editar.** Solo cambia lo que se envía, con las mismas reglas que al
+registrar. `"description": null` (o `""`) quita la descripción; no enviarla
+la deja como estaba.
+
+```sh
+curl -X PATCH localhost:8000/spaces/1/expenses/1 \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' -d '{"amount": 18500}'
+```
+
+**Borrar.** Es definitivo, así que exige `confirm=true`. Sin la
+confirmación responde `400` y no borra nada. El bot y la web preguntarán
+antes de enviarla.
+
+```sh
+curl -X DELETE 'localhost:8000/spaces/1/expenses/2?confirm=true' \
+  -H 'Authorization: Bearer <token de Ana>'
+# 204, sin cuerpo
+```
 
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.
