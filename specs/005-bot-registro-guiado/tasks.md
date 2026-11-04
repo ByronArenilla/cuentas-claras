@@ -116,7 +116,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan.
 - RF: RF-3, RF-6, RF-7, RF-27.
 
-## [ ] T9 — Conversación: registrar un gasto
+## [x] T9 — Conversación: registrar un gasto
 El borrador completo en `bot/conversation.py`.
 
 - Test primero (`test_conversation.py`):
