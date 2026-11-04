@@ -161,7 +161,7 @@ una hora, y las alternativas descartadas (chat fijo en `.env`, llave más
 - Hecho cuando: el ADR existe y el plan lo cita.
 - RF: ninguno; principios 4, 12 y 13.
 
-## [ ] T12 — Cierre: README, roadmap y validación
+## [x] T12 — Cierre: README, roadmap y validación
 - `README.md`: sección del bot: crear el bot con @BotFather, variables de
   `.env`, `make run-bot`, pedir el código, `/vincular` y registrar un
   gasto.
