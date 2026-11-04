@@ -107,7 +107,7 @@ y el router montado en `main.py`.
 - Hecho cuando: los tests pasan.
 - RF: RF-11 a RF-16.
 
-## [ ] T6 — Aislamiento y ciclo de vida con presupuestos
+## [x] T6 — Aislamiento y ciclo de vida con presupuestos
 `test_isolation.py`: amplía los criterios de aislamiento con presupuestos
 y resúmenes, y actualiza su docstring. Si T4 y T5 están bien hechas, no
 debería hacer falta código nuevo; si algún test falla, se corrige en esta
