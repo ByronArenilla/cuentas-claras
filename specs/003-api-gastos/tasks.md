@@ -43,7 +43,7 @@ el índice sobre (`space_id`, `spent_on`).
   `conftest.py`.
 - RF: base de RF-1, RF-3, RF-4 y RF-21.
 
-## [ ] T3 — Esquemas de gastos
+## [x] T3 — Esquemas de gastos
 `schemas.py`: `ExpenseIn`, `ExpensePatch` y `ExpenseOut`, con las
 validaciones compartidas de la tabla del plan y mensajes en español.
 
