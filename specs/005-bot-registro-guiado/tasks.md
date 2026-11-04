@@ -140,7 +140,7 @@ El borrador completo en `bot/conversation.py`.
 - Hecho cuando: los tests pasan.
 - RF: RF-12 a RF-26, RF-28.
 
-## [ ] T10 — Adaptador de Telegram
+## [x] T10 — Adaptador de Telegram
 `bot/telegram_app.py` y `bot/__main__.py`, y `make run-bot`.
 
 - Test primero (`test_telegram_app.py`):
