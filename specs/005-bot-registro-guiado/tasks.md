@@ -26,7 +26,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan.
 - RF: base de RF-2 y RF-5.
 
-## [ ] T3 — Pedir un código de vinculación
+## [x] T3 — Pedir un código de vinculación
 `security.py`: `generate_link_code` y `normalize_link_code`. Rutas:
 `POST /telegram/link-codes` y el router montado en `main.py`.
 

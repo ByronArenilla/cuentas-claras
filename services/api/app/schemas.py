@@ -363,3 +363,13 @@ class SummaryOut(BaseModel):
     period: str
     categories: list[CategorySummaryOut]
     total: TotalSummaryOut
+
+
+# --- Telegram (spec 005) ---
+
+
+class LinkCodeOut(BaseModel):
+    # El código en claro solo aparece en esta respuesta: la base de datos
+    # guarda su hash (RF-2).
+    code: str
+    expires_at: datetime
