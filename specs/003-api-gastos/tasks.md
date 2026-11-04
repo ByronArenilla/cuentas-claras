@@ -64,7 +64,7 @@ validaciones compartidas de la tabla del plan y mensajes en español.
 - Hecho cuando: los tests pasan.
 - RF: RF-3, RF-4, RF-6, RF-7; base de RF-13 y RF-14.
 
-## [ ] T4 — Registrar gastos
+## [x] T4 — Registrar gastos
 `app/routers/expenses.py` con `POST /spaces/{space_id}/expenses`,
 `member_space`, la comprobación de la categoría por `id` y `space_id`, y
 el router montado en `main.py`.

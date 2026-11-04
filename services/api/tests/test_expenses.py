@@ -1,10 +1,17 @@
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import Engine, func, select
+from sqlalchemy.orm import Session
 
 from app import dates
+from app.models import Expense
 from app.schemas import MAX_AMOUNT, ExpenseIn, ExpenseOut, ExpensePatch
+
+Login = Callable[..., dict[str, str]]
 
 # 2026-10-31 a las 20:00 en Bogotá (UTC-5): en UTC ya es 1 de noviembre.
 NOW = datetime(2026, 11, 1, 1, 0, tzinfo=UTC)
@@ -229,3 +236,161 @@ def test_expense_out_has_exactly_the_planned_fields() -> None:
         "created_by",
         "created_at",
     }
+
+
+# --- Registrar (T4) ---
+
+
+def personal_space(client: TestClient, headers: dict[str, str]) -> int:
+    """Id del espacio personal, el único que tiene un usuario recién registrado."""
+    [space] = client.get("/spaces", headers=headers).json()
+    return space["id"]
+
+
+def first_category(client: TestClient, headers: dict[str, str], space_id: int) -> int:
+    """Id de la primera categoría predefinida del espacio ("Hogar")."""
+    response = client.get(f"/spaces/{space_id}/categories", headers=headers)
+    return response.json()[0]["id"]
+
+
+def count_expenses(engine: Engine) -> int:
+    with Session(engine) as db:
+        return db.scalar(select(func.count()).select_from(Expense))
+
+
+@pytest.fixture
+def ana_space(client: TestClient, login: Login) -> tuple[int, int, dict[str, str]]:
+    """Espacio personal de Ana: (id del espacio, id de una categoría, cabecera)."""
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    return space_id, first_category(client, ana, space_id), ana
+
+
+AnaSpace = tuple[int, int, dict[str, str]]
+
+
+@pytest.mark.usefixtures("fixed_clock")
+def test_registering_returns_the_expense_with_its_author(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # RF-1 y RF-8: se guarda en el espacio y con quien lo registró.
+    space_id, category_id, ana = ana_space
+    ana_id = client.get("/me", headers=ana).json()["id"]
+    body = {
+        "amount": 20000,
+        "payment_type": "debit",
+        "category_id": category_id,
+        "spent_on": "2026-10-30",
+        "description": "  mercado ",
+    }
+
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+
+    assert response.status_code == 201
+    expense = response.json()
+    assert set(expense) == set(ExpenseOut.model_fields)
+    assert isinstance(expense["id"], int)
+    assert expense["amount"] == 20000
+    assert expense["payment_type"] == "debit"
+    assert expense["category_id"] == category_id
+    assert expense["spent_on"] == "2026-10-30"
+    assert expense["description"] == "mercado"
+    assert expense["created_by"] == ana_id
+    assert expense["created_at"]
+
+
+def test_registered_expense_is_stored_in_the_route_space(
+    client: TestClient, engine: Engine, ana_space: AnaSpace
+) -> None:
+    space_id, category_id, ana = ana_space
+    body = {**VALID, "category_id": category_id, "space_id": space_id + 1000}
+
+    expense_id = client.post(
+        f"/spaces/{space_id}/expenses", json=body, headers=ana
+    ).json()["id"]
+
+    with Session(engine) as db:
+        assert db.get_one(Expense, expense_id).space_id == space_id
+
+
+@pytest.mark.usefixtures("fixed_clock")
+def test_expense_without_date_falls_on_today_in_tz(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # Criterio 4: el 31 de octubre a las 20:00 en Bogotá ya es 1 de
+    # noviembre en UTC, y el gasto debe caer en octubre (RF-2).
+    space_id, category_id, ana = ana_space
+    body = {**VALID, "category_id": category_id}
+
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+
+    assert response.status_code == 201
+    assert response.json()["spent_on"] == "2026-10-31"
+
+
+def test_category_of_another_space_or_missing_is_rejected(
+    client: TestClient, engine: Engine, login: Login, ana_space: AnaSpace
+) -> None:
+    # RF-5: una categoría de otro espacio cuenta como inexistente.
+    space_id, _, ana = ana_space
+    bea = login("bea@example.com")
+    bea_space = personal_space(client, bea)
+    foreign = first_category(client, bea, bea_space)
+
+    for category_id in (foreign, foreign + 1000):
+        body = {**VALID, "category_id": category_id}
+        response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "La categoría no existe en este espacio."
+    assert count_expenses(engine) == 0
+
+
+@pytest.mark.parametrize(
+    "amount", [20000.0, "20000", True, 0, -1, MAX_AMOUNT + 1, None]
+)
+def test_invalid_amount_is_rejected_and_nothing_is_stored(
+    client: TestClient, engine: Engine, ana_space: AnaSpace, amount: object
+) -> None:
+    # Criterio 5 (RF-3).
+    space_id, category_id, ana = ana_space
+    body = {**VALID, "category_id": category_id, "amount": amount}
+
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+
+    assert response.status_code == 422
+    assert count_expenses(engine) == 0
+
+
+@pytest.mark.usefixtures("fixed_clock")
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"payment_type": "efectivo"},
+        {"spent_on": "2026-11-01"},
+        {"description": "a" * 201},
+    ],
+)
+def test_other_invalid_fields_are_rejected_and_nothing_is_stored(
+    client: TestClient, engine: Engine, ana_space: AnaSpace, change: dict[str, object]
+) -> None:
+    # RF-4, RF-6 y RF-7.
+    space_id, category_id, ana = ana_space
+    body = {**VALID, "category_id": category_id, **change}
+
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+
+    assert response.status_code == 422
+    assert count_expenses(engine) == 0
+
+
+def test_registering_without_session_is_rejected(
+    client: TestClient, engine: Engine, ana_space: AnaSpace
+) -> None:
+    space_id, category_id, _ = ana_space
+    body = {**VALID, "category_id": category_id}
+
+    response = client.post(f"/spaces/{space_id}/expenses", json=body)
+
+    assert response.status_code == 401
+    assert count_expenses(engine) == 0
