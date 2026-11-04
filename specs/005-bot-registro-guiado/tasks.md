@@ -60,7 +60,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan.
 - RF: RF-3 a RF-6, RF-9, RF-10.
 
-## [ ] T5 — Esqueleto del bot y `Makefile`
+## [x] T5 — Esqueleto del bot y `Makefile`
 `services/bot/pyproject.toml`, `bot/__init__.py`, `bot/config.py` y el
 `Makefile`: `install`, `test` y `lint` cubren la API y el bot, y aparece
 `run-bot`.
