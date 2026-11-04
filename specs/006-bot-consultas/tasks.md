@@ -45,7 +45,7 @@ presupuesto de la 005 pasa a usar `remaining_text`.
 - Hecho cuando: los tests pasan.
 - RF: RF-6, RF-7, RF-9 a RF-11.
 
-## [ ] T4 — `/resumen`
+## [x] T4 — `/resumen`
 - Test primero (`test_conversation.py`):
   - Con un espacio, el resumen del mes actual en `TZ` (con el reloj del 31
     de octubre a las 20:00 en Bogotá, es octubre).

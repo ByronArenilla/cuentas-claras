@@ -537,3 +537,109 @@ def test_conversations_of_two_chats_do_not_mix() -> None:
     replies = send(bot, Text("comida"), chat_id=2)
 
     assert "/gasto" in text_of(replies)  # El chat 2 no tiene borrador.
+
+
+# --- /resumen (spec 006, T4) ---
+
+
+def empty_summary(period: str) -> dict:
+    return {
+        "period": period,
+        "categories": [
+            {
+                "category_id": 2,
+                "name": "Comida",
+                "budget": 400_000,
+                "spent": 0,
+                "remaining": 400_000,
+            }
+        ],
+        "total": {"budget": 400_000, "spent": 0, "remaining": 400_000},
+    }
+
+
+def summaries_for(space_ids: list[int], periods: list[str]) -> dict:
+    return {(s, p): empty_summary(p) for s in space_ids for p in periods}
+
+
+def test_summary_of_the_current_month_in_tz() -> None:
+    # RF-5: con el reloj fijado, en Bogotá todavía es octubre.
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-10"])
+
+    replies = send(make(api), Command("resumen"))
+
+    assert api.summary_requests == [(1, "2026-10")]
+    assert text_of(replies).startswith("Personal · octubre de 2026")
+    assert labels(replies[-1]) == ["‹ septiembre", "noviembre ›"]
+
+
+def test_with_two_spaces_summary_asks_the_space_first() -> None:
+    # Criterio 4 de la 006 (decisión 5).
+    api = FakeApi(spaces=TWO_SPACES)
+    api.summaries = summaries_for([2], ["2026-10"])
+    bot = make(api)
+
+    replies = send(bot, Command("resumen"))
+
+    assert labels(replies[-1]) == ["Personal", "Casa"]
+    assert api.summary_requests == []
+    replies = press(bot, replies, "Casa")
+    assert api.summary_requests == [(2, "2026-10")]
+    assert text_of(replies).startswith("Casa · octubre de 2026")
+
+
+def test_summary_buttons_move_month_by_month() -> None:
+    # Criterio 3 de la 006 (RF-8), también cruzando de año.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.summaries = summaries_for([2], ["2026-10", "2026-09", "2026-11"])
+    bot = make(api)
+    october = press(bot, send(bot, Command("resumen")), "Casa")
+
+    september = press(bot, october, "‹ septiembre")
+    november = press(bot, october, "noviembre ›")
+
+    assert api.summary_requests[-2:] == [(2, "2026-09"), (2, "2026-11")]
+    assert text_of(september).startswith("Casa · septiembre de 2026")
+    assert labels(november[-1]) == ["‹ octubre", "diciembre ›"]
+
+    api.summaries = summaries_for([2], ["2026-01", "2025-12"])
+    january = send(bot, Press("sum:2:2026-01"))
+    assert labels(january[-1]) == ["‹ diciembre", "febrero ›"]
+    press(bot, january, "‹ diciembre")
+    assert api.summary_requests[-1] == (2, "2025-12")
+
+
+def test_summary_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # Criterio 7 de la 006 (RF-18).
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-10", "2026-09"])
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    summary = send(bot, Command("resumen"))
+    press(bot, summary, "‹ septiembre")
+    payments = press(bot, categories, "Comida")
+
+    assert labels(payments[-1]) == ["Débito", "Crédito"]
+
+
+def test_summary_buttons_work_without_any_state() -> None:
+    # RF-18, decisión 6: un botón de un resumen sirve en un bot recién
+    # arrancado, sin borrador ni conversación previa.
+    api = FakeApi()
+    api.summaries = summaries_for([1], ["2026-08"])
+
+    replies = send(make(api), Press("sum:1:2026-08"))
+
+    assert text_of(replies).startswith("Personal · agosto de 2026")
+
+
+@pytest.mark.parametrize("data", ["sum:x:2026-10", "sum:1", "sum:1:2026-13", "otra:1"])
+def test_malformed_query_buttons_change_nothing(data: str) -> None:
+    api = FakeApi()
+
+    replies = send(make(api), Press(data))
+
+    assert "ya terminó" in text_of(replies)
+    assert api.summary_requests == []
