@@ -1,4 +1,4 @@
-# Roadmap — cuentas-claras
+# Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
 > **Spec activa:** 004-presupuesto-mensual

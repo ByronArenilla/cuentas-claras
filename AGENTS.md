@@ -1,7 +1,7 @@
-# AGENTS.md — cuentas-claras
+# AGENTS.md — gastito
 
 ## Proyecto
-cuentas-claras es una app personal para controlar el presupuesto mensual.
+gastito es una app personal para controlar el presupuesto mensual.
 Registro cada gasto conversando con un bot de Telegram y consulto en un
 dashboard web cuánto llevo gastado por categoría frente a lo presupuestado.
 
