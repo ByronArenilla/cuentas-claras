@@ -101,7 +101,7 @@ el router montado en `main.py`.
 - Hecho cuando: los tests pasan.
 - RF: RF-8, RF-9, RF-10, RF-11; parte de RF-12.
 
-## [ ] T6 — Editar gastos
+## [x] T6 — Editar gastos
 `PATCH /spaces/{space_id}/expenses/{expense_id}` aplicando solo
 `model_fields_set`, con las mismas validaciones y la misma comprobación de
 categoría que al registrar.

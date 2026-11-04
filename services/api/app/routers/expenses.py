@@ -14,7 +14,7 @@ from app import dates
 from app.db import get_db
 from app.deps import current_user, member_space
 from app.models import Category, Expense, Space, User
-from app.schemas import ExpenseIn, ExpenseOut
+from app.schemas import ExpenseIn, ExpenseOut, ExpensePatch
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
 
@@ -112,4 +112,25 @@ def list_expenses(
 @router.get("/{expense_id}")
 def read_expense(expense: Annotated[Expense, Depends(space_expense)]) -> ExpenseOut:
     """Un gasto del espacio con todos sus campos, incluido su autor (RF-8)."""
+    return ExpenseOut.model_validate(expense)
+
+
+@router.patch("/{expense_id}")
+def update_expense(
+    data: ExpensePatch,
+    expense: Annotated[Expense, Depends(space_expense)],
+    db: Annotated[Session, Depends(get_db)],
+) -> ExpenseOut:
+    """Cambia solo los campos enviados, con las mismas validaciones que al
+    registrar (RF-13). Cualquier miembro puede, aunque lo registrara otro
+    (RF-15). `ExpensePatch` no tiene `space_id` ni `created_by` (RF-14)."""
+    # `exclude_unset`: solo lo que llegó en el cuerpo (`model_fields_set`).
+    # Un `"description": null` sí está y la quita (decisión 8).
+    changes = data.model_dump(exclude_unset=True)
+    if "category_id" in changes:
+        check_category(db, expense.space_id, changes["category_id"])
+
+    for field, value in changes.items():
+        setattr(expense, field, value)
+    db.commit()
     return ExpenseOut.model_validate(expense)

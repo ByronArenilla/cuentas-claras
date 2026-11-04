@@ -536,3 +536,192 @@ def test_members_of_the_same_space_get_the_same_list(
     assert len(ana_list) == 2
     assert ana_list == listed(client, bea, space_id, period="2026-10")
     assert len({expense["created_by"] for expense in ana_list}) == 2
+
+
+# --- Editar (T6) ---
+
+
+def patch_expense(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    expense_id: object,
+    body: dict[str, object],
+) -> object:
+    return client.patch(
+        f"/spaces/{space_id}/expenses/{expense_id}", json=body, headers=headers
+    )
+
+
+def read(
+    client: TestClient, headers: dict[str, str], space_id: int, expense_id: object
+) -> dict[str, object]:
+    return client.get(
+        f"/spaces/{space_id}/expenses/{expense_id}", headers=headers
+    ).json()
+
+
+@pytest.fixture
+def ana_expense(
+    client: TestClient, ana_space: AnaSpace, mid_november: None
+) -> tuple[int, dict[str, str], dict[str, object]]:
+    """Un gasto de Ana con descripción: (id del espacio, cabecera, gasto)."""
+    space_id, category_id, ana = ana_space
+    body = {
+        **VALID,
+        "category_id": category_id,
+        "spent_on": "2026-10-15",
+        "description": "mercado",
+    }
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=ana)
+    return space_id, ana, response.json()
+
+
+AnaExpense = tuple[int, dict[str, str], dict[str, object]]
+
+
+def test_patching_only_amount_keeps_the_rest(
+    client: TestClient, ana_expense: AnaExpense
+) -> None:
+    # RF-13.
+    space_id, ana, expense = ana_expense
+
+    response = patch_expense(client, ana, space_id, expense["id"], {"amount": 15000})
+
+    assert response.status_code == 200
+    assert response.json() == {**expense, "amount": 15000}
+    assert read(client, ana, space_id, expense["id"]) == {**expense, "amount": 15000}
+
+
+@pytest.mark.parametrize("description", [None, ""])
+def test_patching_null_or_empty_description_removes_it(
+    client: TestClient, ana_expense: AnaExpense, description: str | None
+) -> None:
+    # Decisión 8.
+    space_id, ana, expense = ana_expense
+
+    body = {"description": description}
+    response = patch_expense(client, ana, space_id, expense["id"], body)
+
+    assert response.status_code == 200
+    assert read(client, ana, space_id, expense["id"])["description"] is None
+
+
+def test_not_sending_description_keeps_it(
+    client: TestClient, ana_expense: AnaExpense
+) -> None:
+    space_id, ana, expense = ana_expense
+
+    patch_expense(client, ana, space_id, expense["id"], {"payment_type": "credit"})
+
+    assert read(client, ana, space_id, expense["id"])["description"] == "mercado"
+
+
+def test_empty_patch_changes_nothing(
+    client: TestClient, ana_expense: AnaExpense
+) -> None:
+    space_id, ana, expense = ana_expense
+
+    response = patch_expense(client, ana, space_id, expense["id"], {})
+
+    assert response.status_code == 200
+    assert response.json() == expense
+    assert read(client, ana, space_id, expense["id"]) == expense
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"amount": 20000.0},
+        {"amount": 0},
+        {"amount": None},
+        {"spent_on": "2026-11-16"},  # Mañana con el reloj de mediados de noviembre.
+        {"payment_type": "efectivo"},
+    ],
+)
+def test_invalid_patch_is_rejected_and_changes_nothing(
+    client: TestClient, ana_expense: AnaExpense, body: dict[str, object]
+) -> None:
+    space_id, ana, expense = ana_expense
+
+    response = patch_expense(client, ana, space_id, expense["id"], body)
+
+    assert response.status_code == 422
+    assert read(client, ana, space_id, expense["id"]) == expense
+
+
+def test_patching_a_category_of_another_space_is_rejected(
+    client: TestClient, login: Login, ana_expense: AnaExpense
+) -> None:
+    # RF-5 también al editar.
+    space_id, ana, expense = ana_expense
+    bea = login("bea@example.com")
+    foreign = first_category(client, bea, personal_space(client, bea))
+
+    body = {"amount": 1, "category_id": foreign}
+    response = patch_expense(client, ana, space_id, expense["id"], body)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "La categoría no existe en este espacio."
+    assert read(client, ana, space_id, expense["id"]) == expense
+
+
+def test_patching_to_another_category_of_the_space(
+    client: TestClient, ana_expense: AnaExpense
+) -> None:
+    space_id, ana, expense = ana_expense
+    categories = client.get(f"/spaces/{space_id}/categories", headers=ana).json()
+    other = categories[1]["id"]
+
+    response = patch_expense(
+        client, ana, space_id, expense["id"], {"category_id": other}
+    )
+
+    assert response.status_code == 200
+    assert read(client, ana, space_id, expense["id"])["category_id"] == other
+
+
+def test_patch_cannot_change_space_or_author(
+    client: TestClient, engine: Engine, login: Login, ana_expense: AnaExpense
+) -> None:
+    # RF-14.
+    space_id, ana, expense = ana_expense
+    bea = login("bea@example.com")
+    bea_id = client.get("/me", headers=bea).json()["id"]
+    body = {"space_id": personal_space(client, bea), "created_by": bea_id}
+
+    response = patch_expense(client, ana, space_id, expense["id"], body)
+
+    assert response.status_code == 200
+    with Session(engine) as db:
+        stored = db.get_one(Expense, expense["id"])
+        assert stored.space_id == space_id
+        assert stored.created_by == expense["created_by"]
+
+
+def test_patching_a_missing_expense_is_not_found(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    space_id, _, ana = ana_space
+
+    response = patch_expense(client, ana, space_id, 1000, {"amount": 1})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Gasto no encontrado."
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_a_member_edits_an_expense_registered_by_another(
+    client: TestClient, shared_space: tuple[int, dict[str, str], dict[str, str]]
+) -> None:
+    # Criterio 3 (RF-15): Bea edita el gasto de Ana y el autor sigue siendo Ana.
+    space_id, ana, bea = shared_space
+    ana_id = client.get("/me", headers=ana).json()["id"]
+    category_id = first_category(client, ana, space_id)
+    expense = add_expense(client, ana, space_id, category_id, "2026-10-05")
+
+    response = patch_expense(client, bea, space_id, expense["id"], {"amount": 9000})
+
+    assert response.status_code == 200
+    assert response.json()["amount"] == 9000
+    assert response.json()["created_by"] == ana_id
