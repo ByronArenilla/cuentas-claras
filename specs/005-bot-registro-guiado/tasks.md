@@ -39,7 +39,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan.
 - RF: RF-1, RF-2.
 
-## [ ] T4 — Vincular, desvincular y sesiones del bot
+## [x] T4 — Vincular, desvincular y sesiones del bot
 `deps.py`: `bot_client`. `auth.py`: `create_session`. Rutas
 `POST /telegram/chats`, `DELETE /telegram/chats/{chat_id}` y
 `POST /telegram/sessions`.

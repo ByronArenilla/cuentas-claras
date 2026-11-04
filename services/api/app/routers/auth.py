@@ -71,6 +71,21 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
     )
 
 
+def create_session(db: Session, user_id: int, lifetime: timedelta) -> TokenOut:
+    """Crea una sesión que caduca tras `lifetime` y entrega su token; guarda
+    solo el hash (RF-8). La usan el inicio de sesión (15 días) y el bot (una
+    hora, spec 005)."""
+    token = generate_session_token()
+    session = SessionRow(
+        token_hash=hash_token(token),
+        user_id=user_id,
+        expires_at=datetime.now(UTC) + lifetime,
+    )
+    db.add(session)
+    db.commit()
+    return TokenOut(access_token=token, expires_at=session.expires_at)
+
+
 @router.post("/auth/login")
 def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]) -> TokenOut:
     """Crea una sesión de 15 días y entrega su token; guarda solo el hash (RF-8)."""
@@ -80,15 +95,7 @@ def login(data: LoginIn, db: Annotated[Session, Depends(get_db)]) -> TokenOut:
     if not verify_password(password_hash, data.password) or user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, BAD_CREDENTIALS)
 
-    token = generate_session_token()
-    session = SessionRow(
-        token_hash=hash_token(token),
-        user_id=user.id,
-        expires_at=datetime.now(UTC) + SESSION_LIFETIME,
-    )
-    db.add(session)
-    db.commit()
-    return TokenOut(access_token=token, expires_at=session.expires_at)
+    return create_session(db, user.id, SESSION_LIFETIME)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -8,15 +8,16 @@ Toda ruta que recibe un `space_id` depende de `member_space`: es la pieza que
 sostiene el aislamiento entre espacios (principio 5, RF-29, RF-30, RF-32).
 """
 
+import hmac
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import dates
+from app import config, dates
 from app.db import get_db
 from app.models import Membership, Space, User
 from app.models import Session as SessionRow
@@ -104,3 +105,24 @@ def requested_period(period: str | None = None) -> str:
     except ValueError:
         raise INVALID_PERIOD from None
     return period
+
+
+# auto_error=False por la misma razón que `bearer`: el 401 y su mensaje los
+# decide esta capa. También declara la llave en /docs (botón "Authorize").
+bot_key_header = APIKeyHeader(name="X-Bot-Key", auto_error=False)
+
+INVALID_BOT_KEY = HTTPException(
+    status.HTTP_401_UNAUTHORIZED, "Llave del bot no válida."
+)
+
+
+def bot_client(key: Annotated[str | None, Depends(bot_key_header)]) -> None:
+    """Exige la llave del bot en `X-Bot-Key` (RF-9 de la 005).
+
+    `compare_digest` tarda lo mismo acierte o no la llave, así que medir el
+    tiempo de respuesta no ayuda a adivinarla. Se lee `config.settings` en
+    cada llamada para que los tests puedan sustituir la configuración.
+    """
+    expected = config.settings.bot_api_key.encode()
+    if key is None or not hmac.compare_digest(key.encode(), expected):
+        raise INVALID_BOT_KEY
