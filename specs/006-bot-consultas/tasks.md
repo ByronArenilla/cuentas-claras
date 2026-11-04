@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — API: últimos gastos registrados
+## [x] T1 — API: últimos gastos registrados
 `GET /spaces/{space_id}/expenses/recent` en `app/routers/expenses.py`,
 declarada antes de `/{expense_id}`.
 
