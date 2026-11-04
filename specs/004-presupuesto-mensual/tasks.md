@@ -63,7 +63,7 @@ categoría y sus totales), con mensajes en español.
 - Hecho cuando: los tests pasan sin HTTP.
 - RF: RF-3, RF-4, RF-6, RF-11 a RF-14, RF-16, RF-18.
 
-## [ ] T4 — Fijar y quitar el presupuesto
+## [x] T4 — Fijar y quitar el presupuesto
 `app/routers/budgets.py` con `PUT /spaces/{space_id}/budgets/{category_id}`,
 `member_space`, la búsqueda de la categoría por `id` y `space_id`, el
 "buscar y actualizar, o insertar" con su reintento ante `IntegrityError`,

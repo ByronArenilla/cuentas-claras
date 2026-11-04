@@ -7,7 +7,7 @@ from fastapi import FastAPI
 # en la primera petición, si falta una variable obligatoria (RF-33).
 from app.config import settings  # noqa: F401
 from app.db import create_all, engine
-from app.routers import auth, categories, expenses, invitations, spaces
+from app.routers import auth, budgets, categories, expenses, invitations, spaces
 
 
 @asynccontextmanager
@@ -19,6 +19,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="gastito API", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(budgets.router)
 app.include_router(categories.router)
 app.include_router(expenses.router)
 app.include_router(invitations.router)
