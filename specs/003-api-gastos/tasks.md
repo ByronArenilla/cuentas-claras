@@ -82,7 +82,7 @@ el router montado en `main.py`.
   `{space_id}` sigue en verde con la ruta nueva.
 - RF: RF-1, RF-2, RF-3, RF-5, RF-6, RF-7.
 
-## [ ] T5 — Consultar y listar
+## [x] T5 — Consultar y listar
 `GET /spaces/{space_id}/expenses/{expense_id}`, con la dependencia
 `space_expense`, y `GET /spaces/{space_id}/expenses?period=YYYY-MM`.
 

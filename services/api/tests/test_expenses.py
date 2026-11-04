@@ -394,3 +394,145 @@ def test_registering_without_session_is_rejected(
 
     assert response.status_code == 401
     assert count_expenses(engine) == 0
+
+
+# --- Consultar y listar (T5) ---
+
+# Mediados de noviembre en Bogotá: todos los días de octubre y el 1 de
+# noviembre ya pasaron.
+MID_NOVEMBER = datetime(2026, 11, 15, 17, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def mid_november(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dates, "now", lambda: MID_NOVEMBER)
+
+
+def add_expense(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    category_id: int,
+    spent_on: str,
+    amount: int = 20000,
+) -> dict[str, object]:
+    """Registra un gasto por la API y devuelve la respuesta."""
+    body = {**VALID, "category_id": category_id, "spent_on": spent_on}
+    body["amount"] = amount
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
+def listed(
+    client: TestClient, headers: dict[str, str], space_id: int, **params: str
+) -> list[dict[str, object]]:
+    response = client.get(
+        f"/spaces/{space_id}/expenses", params=params, headers=headers
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_expense_is_read_with_all_its_fields(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # RF-8.
+    space_id, category_id, ana = ana_space
+    created = add_expense(client, ana, space_id, category_id, "2026-10-15")
+
+    response = client.get(f"/spaces/{space_id}/expenses/{created['id']}", headers=ana)
+
+    assert response.status_code == 200
+    assert response.json() == created
+
+
+def test_missing_expense_is_not_found(client: TestClient, ana_space: AnaSpace) -> None:
+    space_id, _, ana = ana_space
+
+    response = client.get(f"/spaces/{space_id}/expenses/1000", headers=ana)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Gasto no encontrado."
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_period_includes_its_first_and_last_day_only(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # RF-9: del 1 al 31 de octubre, ni un día más.
+    space_id, category_id, ana = ana_space
+    days = ["2026-09-30", "2026-10-01", "2026-10-31", "2026-11-01"]
+    for day in days:
+        add_expense(client, ana, space_id, category_id, day)
+
+    expenses = listed(client, ana, space_id, period="2026-10")
+
+    assert [expense["spent_on"] for expense in expenses] == ["2026-10-31", "2026-10-01"]
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_list_is_newest_day_first_and_latest_registered_first(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # Decisión 5: a igual día, el registrado después va primero.
+    space_id, category_id, ana = ana_space
+    first = add_expense(client, ana, space_id, category_id, "2026-10-10", 1)
+    older = add_expense(client, ana, space_id, category_id, "2026-10-02", 2)
+    second = add_expense(client, ana, space_id, category_id, "2026-10-10", 3)
+    newest = add_expense(client, ana, space_id, category_id, "2026-10-20", 4)
+
+    ids = [expense["id"] for expense in listed(client, ana, space_id, period="2026-10")]
+
+    assert ids == [newest["id"], second["id"], first["id"], older["id"]]
+
+
+def test_list_without_period_uses_the_current_month_in_tz(
+    client: TestClient, ana_space: AnaSpace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # RF-10: el 31 de octubre a las 20:00 en Bogotá el mes actual es octubre,
+    # aunque en UTC ya sea noviembre.
+    space_id, category_id, ana = ana_space
+    monkeypatch.setattr(dates, "now", lambda: MID_NOVEMBER)
+    add_expense(client, ana, space_id, category_id, "2026-11-01")
+    october = add_expense(client, ana, space_id, category_id, "2026-10-31")
+    monkeypatch.setattr(dates, "now", lambda: NOW)
+
+    assert [expense["id"] for expense in listed(client, ana, space_id)] == [
+        october["id"]
+    ]
+
+
+@pytest.mark.parametrize("period", ["2026-13", "octubre", "2026-1", ""])
+def test_invalid_period_is_rejected_with_the_expected_format(
+    client: TestClient, ana_space: AnaSpace, period: str
+) -> None:
+    # RF-11.
+    space_id, _, ana = ana_space
+
+    response = client.get(
+        f"/spaces/{space_id}/expenses", params={"period": period}, headers=ana
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "El periodo debe tener el formato AAAA-MM, por ejemplo 2026-10."
+    )
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_members_of_the_same_space_get_the_same_list(
+    client: TestClient, shared_space: tuple[int, dict[str, str], dict[str, str]]
+) -> None:
+    # Parte del criterio 3: lo que registra cada uno lo ven los dos.
+    space_id, ana, bea = shared_space
+    category_id = first_category(client, ana, space_id)
+    add_expense(client, ana, space_id, category_id, "2026-10-05")
+    add_expense(client, bea, space_id, category_id, "2026-10-06")
+
+    ana_list = listed(client, ana, space_id, period="2026-10")
+
+    assert len(ana_list) == 2
+    assert ana_list == listed(client, bea, space_id, period="2026-10")
+    assert len({expense["created_by"] for expense in ana_list}) == 2
