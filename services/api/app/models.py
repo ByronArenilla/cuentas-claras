@@ -1,5 +1,5 @@
 """Tablas de usuarios, espacios, membresías, invitaciones, sesiones, categorías,
-gastos, presupuestos y chats de Telegram."""
+gastos y presupuestos."""
 
 import unicodedata
 from datetime import UTC, date, datetime
@@ -220,36 +220,3 @@ class Budget(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utc_now, onupdate=utc_now
     )
-
-
-class TelegramLinkCode(Base):
-    """Código de un solo uso para vincular un chat de Telegram (spec 005).
-
-    Como las invitaciones, se guarda el hash y no el código: una copia de la
-    base de datos no entrega códigos utilizables (RF-2).
-    """
-
-    __tablename__ = "telegram_link_codes"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
-    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
-
-
-class TelegramChat(Base):
-    """Chat privado de Telegram vinculado a un usuario (spec 005).
-
-    `chat_id` es único: un chat pertenece a un solo usuario, y vincularlo de
-    nuevo cambia su `user_id` (RF-5). Un usuario puede tener varios chats.
-    """
-
-    __tablename__ = "telegram_chats"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    # Telegram documenta identificadores de hasta 52 bits: no caben en 32.
-    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)

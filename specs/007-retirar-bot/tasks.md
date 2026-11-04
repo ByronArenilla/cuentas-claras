@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — API: quitar Telegram y la llave del bot
+## [x] T1 — API: quitar Telegram y la llave del bot
 Router, modelos, esquemas, funciones de vinculación, `bot_client` y
 `BOT_API_KEY`.
 

@@ -14,7 +14,6 @@ from app.routers import (
     expenses,
     invitations,
     spaces,
-    telegram,
 )
 
 
@@ -32,7 +31,6 @@ app.include_router(categories.router)
 app.include_router(expenses.router)
 app.include_router(invitations.router)
 app.include_router(spaces.router)
-app.include_router(telegram.router)
 
 
 @app.get("/health")
