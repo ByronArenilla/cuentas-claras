@@ -72,7 +72,7 @@ una llave de prueba; `.env.example` la documenta.
   dos servicios.
 - RF: base de RF-28.
 
-## [ ] T6 — Montos, fechas y formato
+## [x] T6 — Montos, fechas y formato
 `bot/parsing.py` con `parse_amount`, `parse_day`, `format_money` y
 `format_day`.
 
