@@ -301,3 +301,18 @@ def test_data_routes_use_the_space_and_period() -> None:
     assert summary == {"period": "2026-10"}
     assert json.loads(fake.requests[2].content) == {"amount": 20_000}
     assert fake.requests[3].url.params["period"] == "2026-10"
+
+
+@pytest.mark.parametrize(("status", "linked"), [(201, True), (404, False)])
+def test_is_linked_only_asks_for_a_session(status: int, linked: bool) -> None:
+    # RF-7: saber si el chat está vinculado no toca ninguna ruta de datos.
+    fake = FakeApi(
+        {
+            ("POST", "/telegram/sessions"): session_reply()
+            if status == 201
+            else reply(404, {"detail": "no"})
+        }
+    )
+
+    assert run(client_for(fake).is_linked(CHAT)) is linked
+    assert fake.paths() == ["POST /telegram/sessions"]

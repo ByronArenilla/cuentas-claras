@@ -137,7 +137,15 @@ class ApiClient:
         except ApiUnavailable:
             log.warning("No se pudo cerrar la sesión del chat %s.", chat_id)
 
-    # --- Vinculación (RF-3 a RF-6) ---
+    # --- Vinculación (RF-3 a RF-7) ---
+
+    async def is_linked(self, chat_id: int) -> bool:
+        """Si el chat está vinculado, sin tocar ninguna ruta de datos (RF-7)."""
+        try:
+            await self._token(chat_id)
+        except NotLinked:
+            return False
+        return True
 
     async def link_chat(self, chat_id: int, code: str) -> str:
         """Vincula el chat con el código y devuelve el correo del usuario.

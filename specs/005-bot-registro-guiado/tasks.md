@@ -101,7 +101,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan sin red.
 - RF: RF-6, RF-10, RF-11; base de RF-7 y RF-25.
 
-## [ ] T8 — Conversación: ayuda y vinculación
+## [x] T8 — Conversación: ayuda y vinculación
 `bot/conversation.py`: eventos, respuestas, `/start`, `/ayuda`,
 `/vincular` y `/desvincular`.
 
