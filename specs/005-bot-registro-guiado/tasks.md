@@ -151,7 +151,7 @@ El borrador completo en `bot/conversation.py`.
   nombrándolas.
 - RF: RF-8.
 
-## [ ] T11 — ADR 0009: vinculación del chat y llave del bot
+## [x] T11 — ADR 0009: vinculación del chat y llave del bot
 `docs/adr/0009-vinculacion-del-chat-y-llave-del-bot.md` con la plantilla:
 por qué la vinculación se adelanta a la 005, la llave del bot, la sesión de
 una hora, y las alternativas descartadas (chat fijo en `.env`, llave más
