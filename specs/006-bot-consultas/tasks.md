@@ -57,7 +57,7 @@ presupuesto de la 005 pasa a usar `remaining_text`.
 - Hecho cuando: los tests pasan.
 - RF: RF-5 a RF-8, RF-18.
 
-## [ ] T5 — `/ultimos`
+## [x] T5 — `/ultimos`
 - Test primero:
   - Con un espacio, la lista; con dos, primero los botones (criterio 4).
   - Criterio 5: marca el gasto de otro miembro; un espacio vacío lo dice.

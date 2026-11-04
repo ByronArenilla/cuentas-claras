@@ -25,7 +25,7 @@ from bot.parsing import (
     parse_day,
     shift_period,
 )
-from bot.views import remaining_text, summary_text
+from bot.views import recent_text, remaining_text, summary_text
 
 # Un borrador sin respuesta durante este tiempo se descarta (decisión 8).
 DRAFT_TTL = timedelta(minutes=10)
@@ -147,6 +147,7 @@ EXPIRED = (
     "No registré nada."
 )
 ASK_SPACE_FOR_SUMMARY = "¿De qué espacio quieres el resumen?"
+ASK_SPACE_FOR_RECENT = "¿De qué espacio quieres ver los últimos gastos?"
 QUERY_COMMANDS = ("resumen", "ultimos", "deshacer")
 # Botones de consulta: llevan todo lo que necesitan y no dependen del
 # borrador (decisión 6 de la 006).
@@ -256,6 +257,8 @@ class Conversations:
             return await self._help(chat_id)
         if command.name == "resumen":
             return await self._summary_start(chat_id)
+        if command.name == "ultimos":
+            return await self._recent_start(chat_id)
         if command.name == "gasto":
             # RF-26: con un borrador en curso, `/gasto` empieza otro.
             self._drafts.pop(chat_id, None)
@@ -561,6 +564,8 @@ class Conversations:
         try:
             if kind == "sum" and len(parts) == 2 and is_period(parts[1]):
                 return await self._show_summary(chat_id, int(parts[0]), parts[1])
+            if kind == "last" and len(parts) == 1:
+                return await self._show_recent(chat_id, int(parts[0]))
         except ValueError:
             pass
         return [Reply(STALE)]
@@ -599,6 +604,29 @@ class Conversations:
             ),
         )
         return [Reply(summary_text(name, summary), buttons)]
+
+    async def _recent_start(self, chat_id: int) -> list[Reply]:
+        """`/ultimos`: la lista del único espacio, o los botones para elegirlo
+        (RF-9, decisión 5)."""
+        spaces = await self.api.spaces(chat_id)
+        if not spaces:
+            return [Reply(NO_SPACES)]
+        if len(spaces) == 1:
+            return await self._show_recent(chat_id, spaces[0]["id"])
+        buttons = tuple(
+            (Button(space["name"], f"last:{space['id']}"),) for space in spaces
+        )
+        return [Reply(ASK_SPACE_FOR_RECENT, buttons)]
+
+    async def _show_recent(self, chat_id: int, space_id: int) -> list[Reply]:
+        """Los cinco últimos registrados, marcando los de otro miembro
+        (RF-9 a RF-11, decisiones 1 y 7)."""
+        name = await self._space_name(chat_id, space_id)
+        expenses = await self.api.recent_expenses(chat_id, space_id)
+        categories = await self.api.categories(chat_id, space_id)
+        me = await self.api.me(chat_id)
+        names = {c["id"]: c["name"] for c in categories}
+        return [Reply(recent_text(name, expenses, names, me["id"], self.today()))]
 
 
 def is_period(text: str) -> bool:

@@ -643,3 +643,73 @@ def test_malformed_query_buttons_change_nothing(data: str) -> None:
 
     assert "ya terminó" in text_of(replies)
     assert api.summary_requests == []
+
+
+# --- /ultimos (spec 006, T5) ---
+
+
+def expense(
+    expense_id: int,
+    amount: int,
+    created_by: int = 1,
+    created_at: str = "2026-10-31T15:00:00Z",
+    description: str | None = None,
+) -> dict:
+    return {
+        "id": expense_id,
+        "amount": amount,
+        "payment_type": "debit",
+        "category_id": 2,
+        "spent_on": "2026-10-30",
+        "description": description,
+        "created_by": created_by,
+        "created_at": created_at,
+    }
+
+
+def test_recent_with_one_space_lists_the_expenses() -> None:
+    # RF-9, RF-10 (criterio 5 de la 006).
+    api = FakeApi()
+    api.recent = {
+        1: [expense(2, 5_000, created_by=7), expense(1, 20_000, description="Mercado")]
+    }
+
+    replies = send(make(api), Command("ultimos"))
+
+    assert text_of(replies).split("\n") == [
+        "Últimos gastos registrados en Personal:",
+        "",
+        "1. $ 5.000 · Comida · ayer, 30 de octubre · de otro miembro",
+        "2. $ 20.000 · Comida · ayer, 30 de octubre · Mercado",
+    ]
+
+
+def test_recent_of_an_empty_space_says_so() -> None:
+    # RF-11.
+    replies = send(make(FakeApi()), Command("ultimos"))
+
+    assert text_of(replies) == "Todavía no hay gastos registrados en Personal."
+
+
+def test_with_two_spaces_recent_asks_the_space_first() -> None:
+    # Criterio 4 de la 006.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.recent = {2: [expense(1, 20_000)]}
+    bot = make(api)
+
+    replies = send(bot, Command("ultimos"))
+
+    assert labels(replies[-1]) == ["Personal", "Casa"]
+    assert "recent_expenses" not in api.calls
+    assert "en Casa" in text_of(press(bot, replies, "Casa"))
+
+
+def test_recent_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # RF-18.
+    api = FakeApi()
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    send(bot, Command("ultimos"))
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
