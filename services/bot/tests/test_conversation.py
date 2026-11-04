@@ -790,3 +790,47 @@ def test_undo_in_the_middle_of_an_expense_keeps_the_draft() -> None:
     press(bot, send(bot, Command("deshacer")), "Cancelar")
 
     assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+# --- Comunes de la 006 (T7) ---
+
+
+@pytest.mark.parametrize("name", ["resumen", "ultimos", "deshacer"])
+def test_queries_in_an_unlinked_chat_explain_how_to_link(name: str) -> None:
+    # Criterio 8 de la 006 (RF-17).
+    api = FakeApi(linked=False)
+
+    replies = send(make(api), Command(name))
+
+    assert "no está vinculado" in text_of(replies)
+    assert set(api.calls) <= {"spaces"}  # Corta en la primera llamada.
+
+
+@pytest.mark.parametrize("name", ["resumen", "ultimos", "deshacer"])
+def test_queries_with_the_api_down_say_so(name: str) -> None:
+    # RF-19.
+    api = FakeApi()
+    api.down = True
+
+    assert "No pude hablar con gastito" in text_of(send(make(api), Command(name)))
+
+
+def test_a_query_with_the_api_down_keeps_the_draft() -> None:
+    # RF-18 también cuando la consulta falla.
+    api = FakeApi()
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    api.down = True
+    send(bot, Command("resumen"))
+    api.down = False
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+def test_help_names_the_query_commands() -> None:
+    # RF-20.
+    text = text_of(send(make(FakeApi()), Command("ayuda")))
+
+    for command in ("/resumen", "/ultimos", "/deshacer"):
+        assert command in text

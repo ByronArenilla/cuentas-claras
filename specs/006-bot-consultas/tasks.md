@@ -74,7 +74,7 @@ presupuesto de la 005 pasa a usar `remaining_text`.
 - Hecho cuando: los tests pasan.
 - RF: RF-12 a RF-16.
 
-## [ ] T7 — Comunes: chat no vinculado, API caída, ayuda y menú
+## [x] T7 — Comunes: chat no vinculado, API caída, ayuda y menú
 - Test primero:
   - Criterio 8: los tres comandos en un chat no vinculado dan las
     instrucciones.

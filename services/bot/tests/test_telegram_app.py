@@ -8,7 +8,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 from bot.config import Settings
 from bot.conversation import Button, Reply
-from bot.telegram_app import COMMANDS, build_application, is_private, to_markup
+from bot.telegram_app import COMMANDS, MENU, build_application, is_private, to_markup
 
 SETTINGS = Settings(
     telegram_bot_token="123456:token-de-prueba",
@@ -92,3 +92,26 @@ def test_message_handlers_ignore_groups(text: str) -> None:
     assert any(
         handler.filters.check_update(update_in("private", text)) for handler in handlers
     )
+
+
+# --- Spec 006 ---
+
+
+def test_query_commands_are_registered() -> None:
+    assert {"resumen", "ultimos", "deshacer"} <= set(COMMANDS)
+
+
+def test_the_menu_only_lists_existing_commands_with_a_description() -> None:
+    # RF-20, decisión 8.
+    names = [name for name, _ in MENU]
+    assert set(names) <= set(COMMANDS)
+    assert {"gasto", "resumen", "ultimos", "deshacer"} <= set(names)
+    assert all(description.strip() for _, description in MENU)
+    # Telegram admite descripciones de 3 a 256 caracteres.
+    assert all(3 <= len(description) <= 256 for _, description in MENU)
+
+
+def test_the_menu_is_registered_when_the_bot_starts() -> None:
+    app = build_application(SETTINGS)
+
+    assert app.post_init is not None
