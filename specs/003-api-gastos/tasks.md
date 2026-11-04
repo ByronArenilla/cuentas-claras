@@ -148,7 +148,7 @@ falta código nuevo; si algún test falla, se corrige en esta tarea.
 - Hecho cuando: los tests pasan.
 - RF: RF-12, RF-19, RF-20, RF-21.
 
-## [ ] T9 — ADR 0007: la fecha del gasto es un día calendario
+## [x] T9 — ADR 0007: la fecha del gasto es un día calendario
 `docs/adr/0007-fecha-del-gasto-como-dia-calendario.md` con la plantilla
 `0000-plantilla.md`. Explica cómo se cumple el principio 7 con un día sin
 hora ni zona (los instantes van en UTC y "hoy" se calcula en `TZ`), por
