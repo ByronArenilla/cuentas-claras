@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 004-presupuesto-mensual
+> **Spec activa:** 005-bot-registro-guiado
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -12,7 +12,7 @@ está validada. Marca con [x] las specs terminadas.
 - [x] 001-usuarios-y-espacios — Usuarios, espacios y membresías; todo dato cuelga de un espacio.
 - [x] 002-categorias — Categorías predefinidas y creación de nuevas.
 - [x] 003-api-gastos — Registrar, listar, editar y borrar gastos.
-- [ ] 004-presupuesto-mensual — Presupuesto por categoría y mes; resumen gastado vs. presupuestado.
+- [x] 004-presupuesto-mensual — Presupuesto por categoría y mes; resumen gastado vs. presupuestado.
 - [ ] 005-bot-registro-guiado — Registro conversacional en Telegram con confirmación.
 - [ ] 006-bot-consultas — Comandos /resumen, /ultimos y /deshacer.
 - [ ] 007-dashboard-web — Vista del mes: total, por categoría, presupuesto vs. real.

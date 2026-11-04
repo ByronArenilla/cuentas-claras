@@ -183,6 +183,68 @@ curl -X DELETE 'localhost:8000/spaces/1/expenses/2?confirm=true' \
 # 204, sin cuerpo
 ```
 
+## Presupuesto y resumen
+Cada categoría puede tener un presupuesto: lo máximo que el espacio quiere
+gastar en ella cada mes. **Un presupuesto rige desde el mes en que se fija
+y en los siguientes, hasta que se cambie**: no hay que repetirlo cada mes, y
+cambiarlo desde un mes no toca los anteriores. Por qué:
+[ADR 0008](docs/adr/0008-presupuesto-vigente-desde-un-periodo.md).
+Cualquier miembro del espacio puede fijarlo, cambiarlo o quitarlo.
+
+- **Monto**: las mismas reglas que el monto de un gasto, de 1 a un billón
+  de pesos enteros. No existe el presupuesto cero: para dejar una categoría
+  sin presupuesto, se quita.
+- **Periodo** (`period`): el mes `AAAA-MM` desde el que rige. Puede ser
+  pasado, actual o futuro; si no se envía, es el mes actual en `TZ`.
+  Cambiar un mes pasado cambia también los meses que lo heredan.
+
+Por ahora el presupuesto solo se fija con la API; el bot y la web lo
+mostrarán en las specs 006 y 007.
+
+**Fijar.** `PUT` sobre la categoría (aquí la 2, Comida). Repetirlo con el
+mismo mes reemplaza el monto.
+
+```sh
+curl -X PUT localhost:8000/spaces/1/budgets/2 \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' \
+  -d '{"period": "2026-10", "amount": 400000}'
+# {"category_id": 2, "period": "2026-10", "amount": 400000}
+```
+
+**Quitar.** `"amount": null` deja la categoría sin presupuesto desde ese mes
+hasta que se fije otro. No pide confirmación porque no borra gastos.
+`amount` es obligatorio: un cuerpo `{}` responde `422` y no quita nada.
+
+```sh
+curl -X PUT localhost:8000/spaces/1/budgets/2 \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' \
+  -d '{"period": "2026-12", "amount": null}'
+# {"category_id": 2, "period": "2026-12", "amount": null}
+```
+
+**Resumen.** Gastado frente a presupuestado de un mes, por defecto el actual
+en `TZ`. Trae todas las categorías del espacio en orden de creación, aunque
+no tengan presupuesto ni gastos, y los totales.
+
+```sh
+curl 'localhost:8000/spaces/1/summary?period=2026-11' \
+  -H 'Authorization: Bearer <token de Ana>'
+# {"period": "2026-11",
+#  "categories": [
+#    {"category_id": 1, "name": "Hogar", "budget": null, "spent": 0, "remaining": null},
+#    {"category_id": 2, "name": "Comida", "budget": 400000, "spent": 20000, "remaining": 380000},
+#    ...],
+#  "total": {"budget": 400000, "spent": 20000, "remaining": 380000}}
+```
+
+- `budget: null`: la categoría no tiene presupuesto ese mes, así que
+  tampoco hay `remaining`.
+- `remaining` negativo: el presupuesto se excedió.
+- `total.spent` suma todos los gastos del mes, también los de categorías
+  sin presupuesto; `total.budget` suma solo los presupuestos que existen.
+
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.
 - [`docs/roadmap.md`](docs/roadmap.md): fases y specs.
