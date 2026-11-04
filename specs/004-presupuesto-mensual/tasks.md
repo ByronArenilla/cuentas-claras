@@ -126,7 +126,7 @@ tarea.
 - Hecho cuando: los tests pasan.
 - RF: RF-9, RF-17, RF-18, RF-19, RF-20.
 
-## [ ] T7 — ADR 0008: el presupuesto rige desde un periodo
+## [x] T7 — ADR 0008: el presupuesto rige desde un periodo
 `docs/adr/0008-presupuesto-vigente-desde-un-periodo.md` con la plantilla
 `0000-plantilla.md`. Explica que se guarda una fila por cambio y no una por
 mes, que quitar el presupuesto es una fila sin monto y no un borrado, por
