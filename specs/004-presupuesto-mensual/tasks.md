@@ -38,7 +38,7 @@ categoría y sus totales), con mensajes en español.
 - Hecho cuando: los tests pasan.
 - RF: RF-2, RF-7, RF-8, RF-10; base de RF-6 y RF-16.
 
-## [ ] T3 — Cálculo de vigencia y resumen sin HTTP
+## [x] T3 — Cálculo de vigencia y resumen sin HTTP
 `app/summary.py` con `effective_budgets`, `spent_by_category` y
 `build_summary`, como los describe el plan.
 
