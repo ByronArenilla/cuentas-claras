@@ -16,7 +16,7 @@ una llave de prueba; `.env.example` la documenta.
 - Hecho cuando: los tests pasan y el resto de la suite sigue en verde.
 - RF: base de RF-9.
 
-## [ ] T2 — Tablas de Telegram
+## [x] T2 — Tablas de Telegram
 `models.py`: `TelegramLinkCode` y `TelegramChat` como las describe el plan.
 
 - Test primero (`test_models.py`):

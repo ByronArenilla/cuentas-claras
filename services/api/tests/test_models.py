@@ -12,6 +12,8 @@ from app.models import (
     Invitation,
     Membership,
     Space,
+    TelegramChat,
+    TelegramLinkCode,
     User,
     category_key,
 )
@@ -370,3 +372,71 @@ def test_deleting_space_cascades_to_its_budgets(session: Session) -> None:
 
     assert session.scalars(select(Budget.id)).all() == [kept_budget.id]
     assert session.scalars(select(Expense.space_id)).all() == []
+
+
+# --- Telegram (spec 005) ---
+
+
+def make_link_code(session: Session, user: User, code_hash: str = "h") -> None:
+    session.add(
+        TelegramLinkCode(
+            code_hash=code_hash,
+            user_id=user.id,
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        )
+    )
+    session.flush()
+
+
+def test_two_link_codes_cannot_share_a_hash(session: Session) -> None:
+    user = make_user(session)
+    make_link_code(session, user)
+
+    with pytest.raises(IntegrityError):
+        make_link_code(session, user)
+
+
+def test_link_code_starts_unused(session: Session) -> None:
+    user = make_user(session)
+    make_link_code(session, user)
+
+    code = session.scalars(select(TelegramLinkCode)).one()
+    assert code.used_at is None
+    assert code.created_at.tzinfo is UTC
+
+
+def test_a_chat_belongs_to_a_single_user(session: Session) -> None:
+    # RF-5: el índice único sobre `chat_id` lo garantiza.
+    ana, bea = (
+        make_user(session, "ana@example.com"),
+        make_user(session, "bea@example.com"),
+    )
+    session.add(TelegramChat(chat_id=123, user_id=ana.id))
+    session.flush()
+
+    session.add(TelegramChat(chat_id=123, user_id=bea.id))
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_user_can_have_several_chats(session: Session) -> None:
+    ana = make_user(session)
+    session.add_all(
+        [
+            TelegramChat(chat_id=1, user_id=ana.id),
+            TelegramChat(chat_id=2, user_id=ana.id),
+        ]
+    )
+    session.flush()
+
+    assert len(session.scalars(select(TelegramChat)).all()) == 2
+
+
+def test_a_52_bit_chat_id_fits(session: Session) -> None:
+    # Telegram documenta identificadores de hasta 52 bits (plan 005).
+    chat_id = 2**52 - 1
+    session.add(TelegramChat(chat_id=chat_id, user_id=make_user(session).id))
+    session.flush()
+    session.expire_all()
+
+    assert session.scalars(select(TelegramChat.chat_id)).one() == chat_id
