@@ -138,7 +138,7 @@ heredan.
 - Hecho cuando: el ADR existe y el plan lo cita.
 - RF: ninguno; principio 4 y decisión 1.
 
-## [ ] T8 — Cierre: README y validación
+## [x] T8 — Cierre: README y validación
 - Comprobar que `make run-api` crea la tabla `budgets` en la base de datos
   local sin borrar los datos que ya tiene (plan, "Base de datos local").
 - `README.md`: sección de presupuesto con ejemplos `curl` de fijar,
