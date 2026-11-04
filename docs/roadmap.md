@@ -16,6 +16,28 @@ está validada. Marca con [x] las specs terminadas.
 - [ ] 005-bot-registro-guiado — Registro conversacional en Telegram con confirmación.
 - [ ] 006-bot-consultas — Comandos /resumen, /ultimos y /deshacer.
 - [ ] 007-dashboard-web — Vista del mes: total, por categoría, presupuesto vs. real.
+  - **Incluye fijar, cambiar y quitar el presupuesto** de cada categoría desde
+    la vista del mes. Al guardar, la pantalla dice que rige "desde este mes en
+    adelante" (spec 004, decisión 1; ADR 0008). Hoy solo se fija con la API.
+  - **Prototipo visual antes de escribir código.** En la clarificación se
+    hace un prototipo navegable con datos de ejemplo para acordar estética,
+    colores, tipografía y flujos. Es desechable: no entra al repositorio ni
+    cuenta como código de la app, y la spec se escribe a partir de él.
+  - **Decisiones de diseño escritas en la spec**, en una sección propia:
+    pensada primero para el celular; colores, tipografía y espacios como
+    variables CSS; montos en pesos colombianos con `Intl.NumberFormat`
+    (`$ 1.240.000`); estados de vacío, carga y error; contraste suficiente
+    y uso completo con teclado.
+  - **Framework: se evaluó y se mantiene la web sin framework (2026-11-04).**
+    Que la web quede bonita depende del diseño (tipografía, espacios, color,
+    jerarquía), no de React o Vue. Con cuatro pantallas no hay estado que
+    justifique un framework, y uno con librería de componentes añadiría Node,
+    `npm` y un paso de compilación que arrastran Docker, CI e imágenes (principio 2). La opción es
+    CSS propio con variables y módulos de JavaScript nativos. Si el estado
+    de la edición en línea se complica, la clarificación puede evaluar una
+    librería pequeña sin compilación (por ejemplo Alpine.js) con su ADR.
+    También se revisa si Chart.js hace falta: unas barras de progreso en CSS
+    son más ligeras y minimalistas que un gráfico.
 - [ ] 008-control-acceso — Vinculación de chat_id a usuario; sesión en la web.
 
 ## Fase 2 — Docker
