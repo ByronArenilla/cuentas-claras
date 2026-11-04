@@ -713,3 +713,80 @@ def test_recent_in_the_middle_of_an_expense_keeps_the_draft() -> None:
     send(bot, Command("ultimos"))
 
     assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]
+
+
+# --- /deshacer (spec 006, T6) ---
+
+
+def test_undo_proposes_my_latest_expense_across_spaces() -> None:
+    # Criterio 6 de la 006 (RF-12): el más reciente de cualquier espacio, y
+    # nunca el de otro miembro aunque sea más nuevo.
+    api = FakeApi(spaces=TWO_SPACES)
+    api.recent = {
+        1: [expense(1, 20_000, created_at="2026-10-31T10:00:00Z")],
+        2: [
+            expense(5, 99_000, created_by=7, created_at="2026-10-31T23:00:00Z"),
+            expense(4, 8_000, created_at="2026-10-31T12:00:00Z", description="Taxi"),
+        ],
+    }
+
+    replies = send(make(api), Command("deshacer"))
+
+    text = text_of(replies)
+    assert "¿Borro este gasto?" in text
+    assert "$ 8.000 · Comida · ayer, 30 de octubre · Taxi" in text
+    assert "Espacio: Casa" in text
+    assert labels(replies[-1]) == ["Borrar", "Cancelar"]
+    # RF-14: todavía no se borró nada.
+    assert "delete_expense" not in api.calls
+
+
+def test_undo_cancel_deletes_nothing() -> None:
+    # RF-16.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000)]}
+    bot = make(api)
+
+    replies = press(bot, send(bot, Command("deshacer")), "Cancelar")
+
+    assert "No borré nada" in text_of(replies)
+    assert api.deleted == []
+
+
+def test_undo_deletes_only_that_expense_and_only_once() -> None:
+    # Criterio 6 (RF-15).
+    api = FakeApi()
+    api.recent = {1: [expense(2, 5_000), expense(1, 20_000)]}
+    bot = make(api)
+    proposal = send(bot, Command("deshacer"))
+
+    first = press(bot, proposal, "Borrar")
+    second = press(bot, proposal, "Borrar")
+
+    assert "borré el gasto" in text_of(first)
+    assert api.deleted == [(1, 2)]
+    assert "ya no existe" in text_of(second)
+    assert api.deleted == [(1, 2)]
+
+
+def test_undo_without_own_expenses_says_there_is_nothing() -> None:
+    # RF-13: los gastos de otros miembros no cuentan.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000, created_by=7)]}
+
+    replies = send(make(api), Command("deshacer"))
+
+    assert "No tienes gastos que deshacer" in text_of(replies)
+    assert replies[-1].buttons == ()
+
+
+def test_undo_in_the_middle_of_an_expense_keeps_the_draft() -> None:
+    # RF-18.
+    api = FakeApi()
+    api.recent = {1: [expense(1, 20_000)]}
+    bot = make(api)
+    categories = send(bot, Text("20000"))
+
+    press(bot, send(bot, Command("deshacer")), "Cancelar")
+
+    assert labels(press(bot, categories, "Comida")[-1]) == ["Débito", "Crédito"]

@@ -64,7 +64,7 @@ presupuesto de la 005 pasa a usar `remaining_text`.
 - Hecho cuando: los tests pasan.
 - RF: RF-9 a RF-11.
 
-## [ ] T6 — `/deshacer`
+## [x] T6 — `/deshacer`
 - Test primero:
   - Criterio 6: con dos espacios propone el gasto propio más reciente de
     cualquiera de ellos, con su espacio; Cancelar no borra; Borrar borra
