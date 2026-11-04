@@ -1,4 +1,5 @@
-"""Presupuesto de un espacio: fijarlo o quitarlo desde un periodo (spec 004).
+"""Presupuesto de un espacio: fijarlo o quitarlo desde un periodo, y el
+resumen gastado vs. presupuestado (spec 004).
 
 Las rutas reciben el espacio por `member_space`, nunca consultando por
 `space_id` directamente (RF-17; RF-28 y RF-29 de la 001).
@@ -14,9 +15,10 @@ from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
-from app.deps import member_space
+from app.deps import member_space, requested_period
 from app.models import Budget, Category, Space
-from app.schemas import BudgetIn, BudgetOut
+from app.schemas import BudgetIn, BudgetOut, SummaryOut
+from app.summary import build_summary
 
 router = APIRouter(prefix="/spaces/{space_id}", tags=["budgets"])
 
@@ -101,3 +103,15 @@ def set_budget(
         db.rollback()
         save_budget(db, category.space_id, category.id, starts_on, data.amount)
     return BudgetOut(category_id=category.id, period=data.period, amount=data.amount)
+
+
+@router.get("/summary")
+def read_summary(
+    space: Annotated[Space, Depends(member_space)],
+    db: Annotated[Session, Depends(get_db)],
+    period: Annotated[str, Depends(requested_period)],
+) -> SummaryOut:
+    """Gastado vs. presupuestado del periodo, por defecto el actual en `TZ`:
+    todas las categorías del espacio y los totales (RF-11 a RF-15). El
+    cálculo vive en `app/summary.py` (principio 10)."""
+    return build_summary(db, space.id, period)

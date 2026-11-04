@@ -9,9 +9,9 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app import dates
+from app.deps import INVALID_PERIOD
 from app.models import Budget, Expense
 from app.routers import budgets
-from app.routers.expenses import INVALID_PERIOD
 from app.schemas import MAX_AMOUNT, BudgetIn
 
 Login = Callable[..., dict[str, str]]
@@ -335,3 +335,184 @@ def test_setting_a_budget_without_session_is_rejected(
 
     assert response.status_code == 401
     assert stored_budgets(engine) == []
+
+
+# --- Resumen del periodo (T5) ---
+
+SharedSpace = tuple[int, dict[str, str], dict[str, str]]
+
+
+def get_summary(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    period: str | None = None,
+) -> Response:
+    params = {} if period is None else {"period": period}
+    return client.get(f"/spaces/{space_id}/summary", params=params, headers=headers)
+
+
+def budget_in(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    category_id: int,
+    period: str,
+) -> int | None:
+    """Presupuesto vigente de la categoría según el resumen del periodo."""
+    summary = get_summary(client, headers, space_id, period).json()
+    [row] = [r for r in summary["categories"] if r["category_id"] == category_id]
+    return row["budget"]
+
+
+def test_summary_has_every_category_and_the_totals(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # RF-11 a RF-14 por HTTP; el cálculo fino está en `test_summary.py`.
+    space_id, categories, ana = ana_space
+    comida, ocio = categories["Comida"], categories["Ocio"]
+    put_budget(client, ana, space_id, comida, VALID)
+    expense = {
+        "amount": 412_000,
+        "payment_type": "credit",
+        "category_id": comida,
+        "spent_on": "2026-10-15",
+    }
+    client.post(f"/spaces/{space_id}/expenses", json=expense, headers=ana)
+
+    response = get_summary(client, ana, space_id, "2026-10")
+
+    assert response.status_code == 200
+    summary = response.json()
+    assert summary["period"] == "2026-10"
+    # Las siete predefinidas, en su orden (decisión 2).
+    assert [row["name"] for row in summary["categories"]] == list(categories)
+    rows = {row["category_id"]: row for row in summary["categories"]}
+    assert rows[comida] == {
+        "category_id": comida,
+        "name": "Comida",
+        "budget": 400_000,
+        "spent": 412_000,
+        "remaining": -12_000,
+    }
+    assert rows[ocio] == {
+        "category_id": ocio,
+        "name": "Ocio",
+        "budget": None,
+        "spent": 0,
+        "remaining": None,
+    }
+    assert summary["total"] == {
+        "budget": 400_000,
+        "spent": 412_000,
+        "remaining": -12_000,
+    }
+
+
+def test_budget_rules_onwards_and_changes_only_from_its_period(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # Criterio 1 de punta a punta (RF-3, RF-4, RF-10).
+    space_id, categories, ana = ana_space
+    comida = categories["Comida"]
+
+    put_budget(client, ana, space_id, comida, {"period": "2026-09", "amount": 400_000})
+
+    assert budget_in(client, ana, space_id, comida, "2026-08") is None
+    for period in ("2026-09", "2026-10", "2026-11", "2026-12"):
+        assert budget_in(client, ana, space_id, comida, period) == 400_000
+
+    put_budget(client, ana, space_id, comida, {"period": "2026-11", "amount": 500_000})
+
+    assert budget_in(client, ana, space_id, comida, "2026-09") == 400_000
+    assert budget_in(client, ana, space_id, comida, "2026-10") == 400_000
+    assert budget_in(client, ana, space_id, comida, "2026-11") == 500_000
+    assert budget_in(client, ana, space_id, comida, "2026-12") == 500_000
+
+
+def test_removing_the_budget_rules_onwards_and_keeps_the_expenses(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # Criterio 2 de punta a punta (RF-6).
+    space_id, categories, ana = ana_space
+    comida = categories["Comida"]
+    put_budget(client, ana, space_id, comida, {"period": "2026-11", "amount": 500_000})
+    expense = {
+        "amount": 20_000,
+        "payment_type": "debit",
+        "category_id": comida,
+        "spent_on": "2026-10-01",
+    }
+    client.post(f"/spaces/{space_id}/expenses", json=expense, headers=ana)
+    expenses_before = client.get(
+        f"/spaces/{space_id}/expenses", params={"period": "2026-10"}, headers=ana
+    ).json()
+
+    put_budget(client, ana, space_id, comida, {"period": "2026-12", "amount": None})
+
+    assert budget_in(client, ana, space_id, comida, "2026-11") == 500_000
+    assert budget_in(client, ana, space_id, comida, "2026-12") is None
+    assert budget_in(client, ana, space_id, comida, "2027-01") is None
+    expenses_after = client.get(
+        f"/spaces/{space_id}/expenses", params={"period": "2026-10"}, headers=ana
+    ).json()
+    assert expenses_after == expenses_before
+
+
+@pytest.mark.usefixtures("fixed_clock")
+def test_summary_without_period_is_the_current_one_in_tz(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # Criterio 4 completo (RF-2, RF-15): en Bogotá todavía es 31 de octubre.
+    space_id, categories, ana = ana_space
+    put_budget(client, ana, space_id, categories["Comida"], {"amount": 400_000})
+
+    summary = get_summary(client, ana, space_id).json()
+
+    assert summary["period"] == "2026-10"
+    assert summary["total"]["budget"] == 400_000
+
+
+@pytest.mark.parametrize("period", ["2026-13", "octubre", "2026-1", ""])
+def test_invalid_summary_period_gets_the_same_message_as_the_expense_list(
+    client: TestClient, ana_space: AnaSpace, period: str
+) -> None:
+    # RF-15.
+    space_id, _, ana = ana_space
+
+    summary = get_summary(client, ana, space_id, period)
+    expenses = client.get(
+        f"/spaces/{space_id}/expenses", params={"period": period}, headers=ana
+    )
+
+    assert summary.status_code == expenses.status_code == 422
+    assert summary.json()["detail"] == expenses.json()["detail"]
+    assert summary.json()["detail"] == INVALID_PERIOD.detail
+
+
+def test_members_see_the_same_summary_and_change_each_others_budget(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # Criterio 8 (RF-11, decisión 5).
+    space_id, ana, bea = shared_space
+    comida = category_ids(client, ana, space_id)["Comida"]
+    put_budget(client, ana, space_id, comida, VALID)
+
+    response = put_budget(
+        client, bea, space_id, comida, {"period": "2026-10", "amount": 450_000}
+    )
+
+    assert response.status_code == 200
+    seen_by_ana = get_summary(client, ana, space_id, "2026-10").json()
+    seen_by_bea = get_summary(client, bea, space_id, "2026-10").json()
+    assert seen_by_ana == seen_by_bea
+    assert budget_in(client, ana, space_id, comida, "2026-10") == 450_000
+
+
+def test_summary_without_session_is_rejected(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    # RF-17.
+    space_id, _, _ = ana_space
+
+    assert get_summary(client, {}, space_id, "2026-10").status_code == 401

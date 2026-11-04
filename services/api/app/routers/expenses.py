@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
-from app.deps import current_user, member_space
+from app.deps import current_user, member_space, requested_period
 from app.models import Category, Expense, Space, User
-from app.schemas import PERIOD_FORMAT_MESSAGE, ExpenseIn, ExpenseOut, ExpensePatch
+from app.schemas import ExpenseIn, ExpenseOut, ExpensePatch
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
 
@@ -24,9 +24,6 @@ CATEGORY_NOT_IN_SPACE = HTTPException(
 EXPENSE_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Gasto no encontrado.")
 UNCONFIRMED_DELETE = HTTPException(
     status.HTTP_400_BAD_REQUEST, "Para borrar el gasto, confirma con confirm=true."
-)
-INVALID_PERIOD = HTTPException(
-    status.HTTP_422_UNPROCESSABLE_CONTENT, PERIOD_FORMAT_MESSAGE
 )
 
 
@@ -87,17 +84,13 @@ def create_expense(
 def list_expenses(
     space: Annotated[Space, Depends(member_space)],
     db: Annotated[Session, Depends(get_db)],
-    period: str | None = None,
+    period: Annotated[str, Depends(requested_period)],
 ) -> list[ExpenseOut]:
     """Gastos del espacio en el periodo `YYYY-MM`, por defecto el actual en
     `TZ` (RF-9, RF-10). Del día más reciente al más antiguo y, a igual día,
     del registrado después al registrado antes (decisión 5)."""
-    if period is None:
-        period = dates.period_of(dates.today())
-    try:
-        start, end = dates.period_bounds(period)
-    except ValueError:
-        raise INVALID_PERIOD from None
+    # `requested_period` ya validó el periodo o puso el actual.
+    start, end = dates.period_bounds(period)
 
     expenses = db.scalars(
         select(Expense)

@@ -16,9 +16,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import dates
 from app.db import get_db
 from app.models import Membership, Space, User
 from app.models import Session as SessionRow
+from app.schemas import PERIOD_FORMAT_MESSAGE
 from app.security import hash_token
 
 # auto_error=False: sin cabecera devuelve None y el 401 lo decide esta capa,
@@ -81,3 +83,24 @@ def member_space(
     if space is None:
         raise SPACE_NOT_FOUND
     return space
+
+
+INVALID_PERIOD = HTTPException(
+    status.HTTP_422_UNPROCESSABLE_CONTENT, PERIOD_FORMAT_MESSAGE
+)
+
+
+def requested_period(period: str | None = None) -> str:
+    """Periodo `?period=YYYY-MM` de la consulta, por defecto el actual en `TZ`.
+
+    La comparten el listado de gastos (RF-10 y RF-11 de la 003) y el resumen
+    (RF-15 de la 004), así que un periodo mal escrito recibe en las dos el
+    mismo `422`.
+    """
+    if period is None:
+        return dates.period_of(dates.today())
+    try:
+        dates.period_bounds(period)
+    except ValueError:
+        raise INVALID_PERIOD from None
+    return period

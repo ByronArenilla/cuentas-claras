@@ -89,7 +89,7 @@ y el router montado en `main.py`.
   `{space_id}` sigue en verde con la ruta nueva.
 - RF: RF-1, RF-2, RF-5 a RF-10.
 
-## [ ] T5 — Resumen del periodo
+## [x] T5 — Resumen del periodo
 `requested_period` en `app/deps.py`, el listado de gastos usándola, y
 `GET /spaces/{space_id}/summary?period=YYYY-MM` llamando a `build_summary`.
 
