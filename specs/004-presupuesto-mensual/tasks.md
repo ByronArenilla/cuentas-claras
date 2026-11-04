@@ -23,7 +23,7 @@ con `ON DELETE CASCADE`, `category_id` sin `ON DELETE`, `starts_on` `Date`,
   `conftest.py`.
 - RF: base de RF-5, RF-6, RF-7 y RF-20.
 
-## [ ] T2 — Esquemas de presupuesto y resumen
+## [x] T2 — Esquemas de presupuesto y resumen
 `schemas.py`: `BudgetIn`, `BudgetOut` y `SummaryOut` (con sus filas por
 categoría y sus totales), con mensajes en español.
 

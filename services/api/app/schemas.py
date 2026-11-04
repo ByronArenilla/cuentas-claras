@@ -300,3 +300,66 @@ class ExpenseOut(BaseModel):
     description: str | None
     created_by: int
     created_at: datetime
+
+
+# --- Presupuesto y resumen (spec 004) ---
+
+# Lo usan también el listado de gastos y el resumen: un periodo mal escrito
+# recibe el mismo mensaje en toda la API (plan 004).
+PERIOD_FORMAT_MESSAGE = "El periodo debe tener el formato AAAA-MM, por ejemplo 2026-10."
+
+
+def check_period(value: object) -> object:
+    # `period_bounds` es la única regla de qué es un mes válido (plan 003).
+    try:
+        if not isinstance(value, str):
+            raise ValueError
+        dates.period_bounds(value)
+    except ValueError:
+        raise PydanticCustomError("invalid_period", PERIOD_FORMAT_MESSAGE) from None
+    return value
+
+
+Period = Annotated[str, BeforeValidator(check_period)]
+
+
+class BudgetIn(BaseModel):
+    # Sin `space_id` ni `category_id`: salen de la ruta.
+    # Cualquier mes válido, pasado, actual o futuro (RF-10, decisión 3), y
+    # por defecto el actual en `TZ`, calculado al validar (RF-2).
+    period: Period = Field(default_factory=lambda: dates.period_of(dates.today()))
+    # Obligatorio aunque admite `null`: quitar el presupuesto exige escribir
+    # `"amount": null`, así un cuerpo `{}` no lo quita por accidente (RF-6).
+    amount: Amount | None
+
+
+class BudgetOut(BaseModel):
+    category_id: int
+    period: str
+    # Nulo si desde ese periodo la categoría queda sin presupuesto.
+    amount: int | None
+
+
+class CategorySummaryOut(BaseModel):
+    # Con el nombre de la categoría: el resumen es lo que el bot y la web
+    # muestran tal cual (plan 004).
+    category_id: int
+    name: str
+    budget: int | None
+    spent: int
+    # Negativo si se excedió; nulo si no hay presupuesto (RF-13).
+    remaining: int | None
+
+
+class TotalSummaryOut(BaseModel):
+    # Nulos si ninguna categoría tiene presupuesto (RF-14).
+    budget: int | None
+    spent: int
+    remaining: int | None
+
+
+class SummaryOut(BaseModel):
+    # Solo enteros en la unidad mínima de la moneda (RF-16, principio 6).
+    period: str
+    categories: list[CategorySummaryOut]
+    total: TotalSummaryOut

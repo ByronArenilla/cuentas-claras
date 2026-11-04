@@ -14,7 +14,7 @@ from app import dates
 from app.db import get_db
 from app.deps import current_user, member_space
 from app.models import Category, Expense, Space, User
-from app.schemas import ExpenseIn, ExpenseOut, ExpensePatch
+from app.schemas import PERIOD_FORMAT_MESSAGE, ExpenseIn, ExpenseOut, ExpensePatch
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
 
@@ -26,8 +26,7 @@ UNCONFIRMED_DELETE = HTTPException(
     status.HTTP_400_BAD_REQUEST, "Para borrar el gasto, confirma con confirm=true."
 )
 INVALID_PERIOD = HTTPException(
-    status.HTTP_422_UNPROCESSABLE_CONTENT,
-    "El periodo debe tener el formato AAAA-MM, por ejemplo 2026-10.",
+    status.HTTP_422_UNPROCESSABLE_CONTENT, PERIOD_FORMAT_MESSAGE
 )
 
 
