@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 
-## [ ] T1 — Modelo `Budget`
+## [x] T1 — Modelo `Budget`
 `app/models.py`: la tabla `budgets` como la describe el plan (`space_id`
 con `ON DELETE CASCADE`, `category_id` sin `ON DELETE`, `starts_on` `Date`,
 `amount` `BigInteger` nulo, `updated_at`), la `CheckConstraint` y la
