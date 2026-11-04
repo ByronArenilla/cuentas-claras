@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from bot.api import ApiError, ApiRejected, ApiUnavailable, InvalidCode, NotLinked
 from bot.parsing import format_day, format_money, month_name, parse_amount, parse_day
+from bot.views import remaining_text
 
 # Un borrador sin respuesta durante este tiempo se descarta (decisión 8).
 DRAFT_TTL = timedelta(minutes=10)
@@ -516,6 +517,4 @@ class Conversations:
         if row["budget"] is None:
             return f"{name}: llevas {spent} en {month}. No tiene presupuesto."
         line = f"{name}: llevas {spent} de {format_money(row['budget'])} en {month}."
-        if row["remaining"] < 0:
-            return f"{line} Te pasaste por {format_money(-row['remaining'])}."
-        return f"{line} Te quedan {format_money(row['remaining'])}."
+        return f"{line} {remaining_text(row['remaining'])}"

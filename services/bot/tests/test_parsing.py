@@ -2,7 +2,14 @@ from datetime import date
 
 import pytest
 
-from bot.parsing import format_day, format_money, month_name, parse_amount, parse_day
+from bot.parsing import (
+    format_day,
+    format_money,
+    month_name,
+    parse_amount,
+    parse_day,
+    shift_period,
+)
 
 TODAY = date(2026, 11, 4)
 
@@ -93,3 +100,20 @@ def test_days_are_written_in_spanish(day: date, text: str) -> None:
 
 def test_month_names_are_in_spanish() -> None:
     assert [month_name(m) for m in (1, 3, 12)] == ["enero", "marzo", "diciembre"]
+
+
+@pytest.mark.parametrize(
+    ("period", "months", "shifted"),
+    [
+        ("2026-10", -1, "2026-09"),
+        ("2026-10", 1, "2026-11"),
+        ("2026-01", -1, "2025-12"),
+        ("2026-12", 1, "2027-01"),
+        ("2026-06", -18, "2024-12"),
+    ],
+)
+def test_shift_period_moves_whole_months(
+    period: str, months: int, shifted: str
+) -> None:
+    # RF-8 de la 006: ‹ y › del resumen.
+    assert shift_period(period, months) == shifted

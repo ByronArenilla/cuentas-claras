@@ -30,7 +30,7 @@ declarada antes de `/{expense_id}`.
 - Hecho cuando: los tests pasan sin red.
 - RF: base de RF-10, RF-12 y RF-15.
 
-## [ ] T3 — Textos y periodos
+## [x] T3 — Textos y periodos
 `bot/views.py` y `shift_period` en `bot/parsing.py`. La línea de
 presupuesto de la 005 pasa a usar `remaining_text`.
 
