@@ -36,6 +36,11 @@ class ApiRejected(ApiError):
         self.detail = detail
 
 
+class NotFound(ApiRejected):
+    """Una ruta de datos respondió `404`: por ejemplo, el gasto ya no existe
+    (RF-15 de la 006)."""
+
+
 class ApiUnavailable(ApiError):
     """La API no respondió, falló o rechazó la configuración del bot."""
 
@@ -119,6 +124,8 @@ class ApiClient:
             if response.status_code == 401 and attempt == 0:
                 self._tokens.pop(chat_id, None)
                 continue
+            if response.status_code == 404:
+                raise NotFound(error_detail(response))
             if response.is_error:
                 raise ApiRejected(error_detail(response))
             return response.json() if response.content else None
@@ -186,4 +193,33 @@ class ApiClient:
     async def summary(self, chat_id: int, space_id: int, period: str) -> dict:
         return await self._as_chat(
             chat_id, "GET", f"/spaces/{space_id}/summary", params={"period": period}
+        )
+
+    # --- Consultas y deshacer (spec 006) ---
+
+    async def me(self, chat_id: int) -> dict:
+        """El usuario del chat: su `id` distingue sus gastos (decisión 7)."""
+        return await self._as_chat(chat_id, "GET", "/me")
+
+    async def recent_expenses(
+        self, chat_id: int, space_id: int, limit: int = 5, mine: bool = False
+    ) -> list[dict]:
+        """Últimos gastos registrados del espacio (RF-1 y RF-2 de la 006)."""
+        return await self._as_chat(
+            chat_id,
+            "GET",
+            f"/spaces/{space_id}/expenses/recent",
+            params={"limit": limit, "mine": mine},
+        )
+
+    async def delete_expense(
+        self, chat_id: int, space_id: int, expense_id: int
+    ) -> None:
+        """Borra el gasto. Solo se llama después de que el usuario toque
+        Borrar (RF-14 de la 006, principio 8)."""
+        await self._as_chat(
+            chat_id,
+            "DELETE",
+            f"/spaces/{space_id}/expenses/{expense_id}",
+            params={"confirm": "true"},
         )

@@ -20,7 +20,7 @@ declarada antes de `/{expense_id}`.
   `{space_id}` sigue en verde.
 - RF: RF-1 a RF-4.
 
-## [ ] T2 — Cliente: rutas nuevas
+## [x] T2 — Cliente: rutas nuevas
 `bot/api.py`: `me`, `recent_expenses`, `delete_expense` y `NotFound`.
 
 - Test primero (`test_api.py`):
