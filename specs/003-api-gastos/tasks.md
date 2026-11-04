@@ -131,7 +131,7 @@ categoría que al registrar.
 - Hecho cuando: los tests pasan.
 - RF: RF-15, RF-16, RF-17, RF-18.
 
-## [ ] T8 — Aislamiento y ciclo de vida con gastos
+## [x] T8 — Aislamiento y ciclo de vida con gastos
 `test_isolation.py`: amplía los criterios de aislamiento con gastos reales
 y actualiza su docstring. Si T4 a T7 están bien hechas, no debería hacer
 falta código nuevo; si algún test falla, se corrige en esta tarea.
