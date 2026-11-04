@@ -119,7 +119,7 @@ categoría que al registrar.
 - Hecho cuando: los tests pasan.
 - RF: RF-13, RF-14, RF-15.
 
-## [ ] T7 — Borrar gastos
+## [x] T7 — Borrar gastos
 `DELETE /spaces/{space_id}/expenses/{expense_id}?confirm=true`.
 
 - Test primero:

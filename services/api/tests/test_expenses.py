@@ -725,3 +725,90 @@ def test_a_member_edits_an_expense_registered_by_another(
     assert response.status_code == 200
     assert response.json()["amount"] == 9000
     assert response.json()["created_by"] == ana_id
+
+
+# --- Borrar (T7) ---
+
+
+def delete_expense(
+    client: TestClient,
+    headers: dict[str, str],
+    space_id: int,
+    expense_id: object,
+    **params: str,
+) -> object:
+    return client.delete(
+        f"/spaces/{space_id}/expenses/{expense_id}", params=params, headers=headers
+    )
+
+
+def test_deleting_with_confirmation_removes_the_expense(
+    client: TestClient, ana_expense: AnaExpense
+) -> None:
+    # RF-16: borrado definitivo.
+    space_id, ana, expense = ana_expense
+
+    response = delete_expense(client, ana, space_id, expense["id"], confirm="true")
+
+    assert response.status_code == 204
+    read_back = client.get(f"/spaces/{space_id}/expenses/{expense['id']}", headers=ana)
+    assert read_back.status_code == 404
+    assert listed(client, ana, space_id, period="2026-10") == []
+
+
+@pytest.mark.parametrize("params", [{}, {"confirm": "false"}])
+def test_deleting_without_confirmation_is_rejected(
+    client: TestClient, ana_expense: AnaExpense, params: dict[str, str]
+) -> None:
+    # RF-17.
+    space_id, ana, expense = ana_expense
+
+    response = delete_expense(client, ana, space_id, expense["id"], **params)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Para borrar el gasto, confirma con confirm=true."
+    )
+    assert read(client, ana, space_id, expense["id"]) == expense
+
+
+def test_deleting_an_expense_leaves_the_rest_of_the_space(
+    client: TestClient, ana_space: AnaSpace, mid_november: None
+) -> None:
+    # RF-18.
+    space_id, category_id, ana = ana_space
+    categories = client.get(f"/spaces/{space_id}/categories", headers=ana).json()
+    gone = add_expense(client, ana, space_id, category_id, "2026-10-05")
+    kept = add_expense(client, ana, space_id, category_id, "2026-10-06")
+
+    delete_expense(client, ana, space_id, gone["id"], confirm="true")
+
+    assert listed(client, ana, space_id, period="2026-10") == [kept]
+    assert client.get(f"/spaces/{space_id}/categories", headers=ana).json() == (
+        categories
+    )
+
+
+def test_deleting_a_missing_expense_is_not_found(
+    client: TestClient, ana_space: AnaSpace
+) -> None:
+    space_id, _, ana = ana_space
+
+    response = delete_expense(client, ana, space_id, 1000, confirm="true")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.usefixtures("mid_november")
+def test_a_member_deletes_an_expense_registered_by_another(
+    client: TestClient, shared_space: tuple[int, dict[str, str], dict[str, str]]
+) -> None:
+    # RF-15.
+    space_id, ana, bea = shared_space
+    category_id = first_category(client, ana, space_id)
+    expense = add_expense(client, ana, space_id, category_id, "2026-10-05")
+
+    response = delete_expense(client, bea, space_id, expense["id"], confirm="true")
+
+    assert response.status_code == 204
+    assert listed(client, ana, space_id, period="2026-10") == []

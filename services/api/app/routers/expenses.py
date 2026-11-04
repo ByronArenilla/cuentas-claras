@@ -6,8 +6,8 @@ Las rutas reciben el espacio por `member_space`, nunca consultando por
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app import dates
@@ -22,6 +22,9 @@ CATEGORY_NOT_IN_SPACE = HTTPException(
     status.HTTP_422_UNPROCESSABLE_CONTENT, "La categoría no existe en este espacio."
 )
 EXPENSE_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Gasto no encontrado.")
+UNCONFIRMED_DELETE = HTTPException(
+    status.HTTP_400_BAD_REQUEST, "Para borrar el gasto, confirma con confirm=true."
+)
 INVALID_PERIOD = HTTPException(
     status.HTTP_422_UNPROCESSABLE_CONTENT,
     "El periodo debe tener el formato AAAA-MM, por ejemplo 2026-10.",
@@ -134,3 +137,29 @@ def update_expense(
         setattr(expense, field, value)
     db.commit()
     return ExpenseOut.model_validate(expense)
+
+
+@router.delete("/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_expense(
+    expense: Annotated[Expense, Depends(space_expense)],
+    db: Annotated[Session, Depends(get_db)],
+    confirm: str | None = None,
+) -> Response:
+    """Borra el gasto de forma definitiva, solo con `confirm=true` (RF-16,
+    RF-17). Cualquier miembro puede, aunque lo registrara otro (RF-15).
+
+    Se exige el texto `true` exacto, no cualquier valor que FastAPI leería
+    como verdadero (`1`, `yes`, `on`): la confirmación debe ser explícita
+    (principio 8, decisión 3).
+    """
+    if confirm != "true":
+        raise UNCONFIRMED_DELETE
+
+    # Por `id` y `space_id`: la sentencia nunca toca otra fila (RF-18).
+    db.execute(
+        delete(Expense).where(
+            Expense.id == expense.id, Expense.space_id == expense.space_id
+        )
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
