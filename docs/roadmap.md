@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 006-bot-consultas
+> **Spec activa:** 007-dashboard-web
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -14,7 +14,7 @@ está validada. Marca con [x] las specs terminadas.
 - [x] 003-api-gastos — Registrar, listar, editar y borrar gastos.
 - [x] 004-presupuesto-mensual — Presupuesto por categoría y mes; resumen gastado vs. presupuestado.
 - [x] 005-bot-registro-guiado — Vinculación del chat y registro conversacional en Telegram con confirmación.
-- [ ] 006-bot-consultas — Comandos /resumen, /ultimos y /deshacer.
+- [x] 006-bot-consultas — Comandos /resumen, /ultimos y /deshacer.
 - [ ] 007-dashboard-web — Vista del mes: total, por categoría, presupuesto vs. real.
   - **Incluye fijar, cambiar y quitar el presupuesto** de cada categoría desde
     la vista del mes. Al guardar, la pantalla dice que rige "desde este mes en

@@ -290,7 +290,35 @@ Comida: llevas $ 412.000 de $ 400.000 en noviembre. Te pasaste por $ 12.000.
 ```
 
 `/cancelar` descarta el gasto en cualquier paso, y un gasto sin respuesta
-durante 10 minutos se descarta solo. `/ayuda` muestra los comandos.
+durante 10 minutos se descarta solo.
+
+**5. Consultar y deshacer.** Si tienes varios espacios, el bot pregunta de
+cuál con botones.
+
+- `/resumen`: cómo vas este mes frente al presupuesto, con el total y las
+  categorías que tienen presupuesto o gastos. Los botones `‹` y `›` llevan
+  al mes anterior o al siguiente.
+
+  ```
+  Casa · noviembre de 2026
+  Gastado: $ 450.000 de $ 500.000. Te quedan $ 50.000.
+
+  Comida: $ 412.000 de $ 400.000. Te pasaste por $ 12.000.
+  Transporte: $ 38.000. Sin presupuesto.
+  ```
+
+- `/ultimos`: los cinco últimos gastos registrados en el espacio, de
+  cualquier mes, con los de otros miembros marcados.
+- `/deshacer`: muestra el último gasto que registraste, en cualquiera de tus
+  espacios, y lo borra solo si tocas **Borrar**.
+
+Estos botones siguen funcionando aunque el bot se reinicie, y usarlos no
+interrumpe un gasto que estés registrando. El bot registra sus comandos en
+el menú de Telegram al arrancar, así que aparecen al escribir `/`. `/ayuda`
+los muestra todos.
+
+La API ofrece además `GET /spaces/{id}/expenses/recent?limit=5&mine=false`:
+los últimos gastos registrados del espacio, de cualquier mes.
 
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.

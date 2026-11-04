@@ -85,7 +85,7 @@ presupuesto de la 005 pasa a usar `remaining_text`.
 - Hecho cuando: los tests pasan.
 - RF: RF-17, RF-19, RF-20.
 
-## [ ] T8 — Cierre: README, roadmap y validación
+## [x] T8 — Cierre: README, roadmap y validación
 - `README.md`: `/resumen`, `/ultimos` y `/deshacer` en la sección del bot,
   y que el menú se registra solo.
 - Repasar los nueve criterios de validación.
