@@ -2,8 +2,10 @@
 
 ## Proyecto
 gastito es una app personal para controlar el presupuesto mensual.
-Registro cada gasto conversando con un bot de Telegram y consulto en un
-dashboard web cuánto llevo gastado por categoría frente a lo presupuestado.
+Planeo el mes en el computador y registro cada gasto desde el celular, en
+la misma app web: la fijo en la pantalla de inicio desde el navegador y se
+abre como una aplicación, sin descargar nada de una tienda. Ahí mismo
+consulto cuánto llevo gastado frente a lo presupuestado.
 
 También es mi portafolio DevOps: la aplicación se mantiene pequeña a
 propósito y la infraestructura crece por fases (Docker, Nginx, GitHub
@@ -15,7 +17,7 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
   fuente de verdad sobre en qué punto está el proyecto.
 - `specs/NNN-nombre/`: `spec.md`, `plan.md` y `tasks.md` de cada spec.
 - `docs/adr/`: decisiones técnicas.
-- `services/api/`, `services/bot/`, `services/web/`: los tres servicios.
+- `services/api/`, `services/web/`: los dos servicios.
 - Si una carpeta tiene su propio `AGENTS.md`, sus reglas se suman a estas
   para los archivos de esa carpeta.
 
@@ -42,14 +44,15 @@ está escrita, pregunta en lugar de suponer.
 ## Stack de la aplicación
 - api: Python 3.12, FastAPI, SQLAlchemy, pytest. Único servicio con acceso a
   la base de datos, que se configura con `DATABASE_URL`.
-- bot: Python 3.12, python-telegram-bot, httpx. Solo habla con la API.
-- web: HTML + JavaScript sin framework, Chart.js. Solo habla con la API.
+- web: HTML + JavaScript sin framework; se fija en la pantalla de inicio
+  como una app web. Solo habla con la API. El bot de Telegram se retiró
+  (ADR 0010).
 
 ## Comandos
 Usa siempre el `Makefile` de la raíz. Los nombres de los targets no cambian
 aunque cambie lo que hacen por dentro en cada fase:
 - `make install`: instala dependencias de desarrollo.
-- `make run-api`, `make run-bot`, `make run-web`: ejecutan cada servicio.
+- `make run-api`, `make run-web`: ejecutan cada servicio.
 - `make test`: tests de todos los servicios.
 - `make lint`: `ruff check` y `ruff format --check`.
 - `make up` / `make down`: levantan y detienen el stack completo (desde la
@@ -106,5 +109,5 @@ Estoy aprendiendo DevOps con este proyecto. Por eso:
 ## Al terminar cualquier tarea
 - Ejecuta `make test` y `make lint` y muestra el resultado.
 - Marca la tarea en `tasks.md` e indica qué RF cubre.
-- Si el cambio se verifica a mano (bot, web o infraestructura), explica cómo
+- Si el cambio se verifica a mano (web o infraestructura), explica cómo
   comprobarlo.
