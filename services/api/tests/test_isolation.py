@@ -1,23 +1,25 @@
 """Tests que cuidan el principio 5: dos espacios nunca ven los datos del otro.
 
-Los datos observables son los propios espacios, sus membresías (plan 001) y
-sus categorías (spec 002). Las specs 003 y 004 ampliarán estos tests con
-gastos y presupuestos.
+Los datos observables son los propios espacios, sus membresías (plan 001),
+sus categorías (spec 002) y sus gastos (spec 003). La spec 004 ampliará estos
+tests con presupuestos.
 """
 
 import importlib
 import pkgutil
 from collections.abc import Callable
+from datetime import UTC, datetime
 
+import pytest
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from app import routers
+from app import dates, routers
 from app.deps import member_space
-from app.models import Category, User
+from app.models import Category, Expense, User
 from app.models import Session as SessionRow
 
 Login = Callable[..., dict[str, str]]
@@ -212,3 +214,159 @@ def test_the_api_keeps_no_active_space() -> None:
     for model in (User, SessionRow):
         columns = model.__table__.columns.keys()
         assert not [name for name in columns if "space" in name], model.__name__
+
+
+# --- Gastos (spec 003) ---
+
+# 15 de octubre de 2026 a mediodía en Bogotá: los gastos sin fecha caen en
+# octubre y el listado sin periodo también es octubre.
+OCTOBER_15 = datetime(2026, 10, 15, 17, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def october(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dates, "now", lambda: OCTOBER_15)
+
+
+def add_expense(
+    client: TestClient, headers: dict[str, str], space_id: int, amount: int = 20000
+) -> dict:
+    """Registra un gasto de hoy en la primera categoría del espacio."""
+    categories = client.get(f"/spaces/{space_id}/categories", headers=headers).json()
+    body = {
+        "amount": amount,
+        "payment_type": "debit",
+        "category_id": categories[0]["id"],
+    }
+    response = client.post(f"/spaces/{space_id}/expenses", json=body, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
+def expense_operations(
+    client: TestClient, headers: dict[str, str], space_id: int, expense_id: int
+) -> dict[str, object]:
+    """Consultar, listar, editar y borrar un gasto por la ruta de `space_id`."""
+    url = f"/spaces/{space_id}/expenses"
+    return {
+        "consultar": client.get(f"{url}/{expense_id}", headers=headers),
+        "listar": client.get(url, headers=headers),
+        "editar": client.patch(
+            f"{url}/{expense_id}", json={"amount": 1}, headers=headers
+        ),
+        "borrar": client.delete(
+            f"{url}/{expense_id}", params={"confirm": "true"}, headers=headers
+        ),
+    }
+
+
+def listed_expenses(
+    client: TestClient, headers: dict[str, str], space_id: int
+) -> list[dict]:
+    response = client.get(f"/spaces/{space_id}/expenses", headers=headers)
+    assert response.status_code == 200
+    return response.json()
+
+
+def count_expenses(engine: Engine, space_id: int) -> int:
+    query = select(func.count()).where(Expense.space_id == space_id)
+    with Session(engine) as db:
+        return db.scalar(query)
+
+
+def personal(client: TestClient, headers: dict[str, str]) -> int:
+    [space] = spaces(client, headers)
+    return space["id"]
+
+
+@pytest.mark.usefixtures("october")
+def test_users_in_different_spaces_cannot_touch_each_others_expenses(
+    client: TestClient, login: Login
+) -> None:
+    # Criterio 1 (RF-12, RF-19): ni por la ruta del espacio ajeno ni pidiendo
+    # el gasto ajeno desde el espacio propio.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    ana_space, bea_space = personal(client, ana), personal(client, bea)
+    ana_expense = add_expense(client, ana, ana_space)
+    bea_expense = add_expense(client, bea, bea_space)
+
+    for headers, foreign_space, own_space, foreign_expense in (
+        (ana, bea_space, ana_space, bea_expense),
+        (bea, ana_space, bea_space, ana_expense),
+    ):
+        by_foreign_route = expense_operations(
+            client, headers, foreign_space, foreign_expense["id"]
+        )
+        for operation, response in by_foreign_route.items():
+            assert response.status_code == 404, operation
+            assert response.json()["detail"] == "Espacio no encontrado.", operation
+
+        by_own_route = expense_operations(
+            client, headers, own_space, foreign_expense["id"]
+        )
+        del by_own_route["listar"]  # El listado del espacio propio es legítimo.
+        for operation, response in by_own_route.items():
+            assert response.status_code == 404, operation
+            assert response.json()["detail"] == "Gasto no encontrado.", operation
+
+    # Nada cambió: cada una sigue viendo solo su gasto, intacto.
+    assert listed_expenses(client, ana, ana_space) == [ana_expense]
+    assert listed_expenses(client, bea, bea_space) == [bea_expense]
+
+
+@pytest.mark.usefixtures("october")
+def test_expense_of_space_a_by_route_of_space_b_is_not_found(
+    client: TestClient, login: Login
+) -> None:
+    # Criterio 2 (RF-12): Ana es miembro de los dos espacios, pero el gasto
+    # solo existe en la ruta de su espacio.
+    ana = login("ana@example.com")
+    space_a = create_space(client, ana, "Casa")
+    space_b = create_space(client, ana, "Viajes")
+    expense = add_expense(client, ana, space_a)
+
+    by_route_b = expense_operations(client, ana, space_b, expense["id"])
+    del by_route_b["listar"]
+    for operation, response in by_route_b.items():
+        assert response.status_code == 404, operation
+        assert response.json()["detail"] == "Gasto no encontrado.", operation
+
+    assert listed_expenses(client, ana, space_b) == []
+    assert listed_expenses(client, ana, space_a) == [expense]
+
+
+@pytest.mark.usefixtures("october")
+def test_deleting_a_space_deletes_only_its_expenses(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # Criterio 6 (RF-21): mismo usuario, dos espacios.
+    ana = login("ana@example.com")
+    casa = create_space(client, ana, "Casa")
+    viajes = create_space(client, ana, "Viajes")
+    kept = add_expense(client, ana, casa)
+    add_expense(client, ana, viajes)
+    add_expense(client, ana, viajes)
+
+    response = client.delete(
+        f"/spaces/{viajes}", params={"confirm": "Viajes"}, headers=ana
+    )
+
+    assert response.status_code == 204
+    assert count_expenses(engine, viajes) == 0
+    assert listed_expenses(client, ana, casa) == [kept]
+
+
+@pytest.mark.usefixtures("october")
+def test_expenses_of_a_member_who_leaves_stay_with_their_author(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # Criterio 7 (RF-20): salir solo borra la membresía.
+    space_id, ana, bea = shared_space
+    bea_id = client.get("/me", headers=bea).json()["id"]
+    expense = add_expense(client, bea, space_id)
+
+    response = client.delete(f"/spaces/{space_id}/members/me", headers=bea)
+
+    assert response.status_code == 204
+    assert listed_expenses(client, ana, space_id) == [expense]
+    assert expense["created_by"] == bea_id

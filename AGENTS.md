@@ -1,7 +1,7 @@
-# AGENTS.md — budget-ops
+# AGENTS.md — gastito
 
 ## Proyecto
-budget-ops es una app personal para controlar el presupuesto mensual.
+gastito es una app personal para controlar el presupuesto mensual.
 Registro cada gasto conversando con un bot de Telegram y consulto en un
 dashboard web cuánto llevo gastado por categoría frente a lo presupuestado.
 
