@@ -1,0 +1,37 @@
+[project]
+name = "gastito-bot"
+version = "0.1.0"
+description = "Bot de Telegram de gastito: registra gastos conversando."
+requires-python = ">=3.12"
+dependencies = [
+    "python-telegram-bot>=22,<23",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+# Se instala como paquete editable para que `import bot` funcione en tests.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# Las mismas reglas que la API (AGENTS.md): Python 3.12 y type hints.
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]

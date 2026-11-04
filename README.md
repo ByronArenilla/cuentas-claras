@@ -13,19 +13,22 @@ Se desarrolla con **Spec-Driven Development (SDD)**: todo empieza por una spec.
 ## Estado
 Fase actual y spec activa: ver [`docs/roadmap.md`](docs/roadmap.md).
 
-## Puesta en marcha (API)
+## Puesta en marcha
 Requiere Python 3.12 y `make`.
 
 ```sh
-make install          # crea services/api/.venv e instala dependencias
+make install          # crea el entorno virtual de la API y del bot
 cp .env.example .env  # y rellena los valores
 make run-api          # http://localhost:8000
-make test             # tests
+make run-bot          # el bot de Telegram (ver "Bot de Telegram")
+make test             # tests de la API y del bot
 make lint             # ruff check y ruff format --check
 ```
 
-Si falta `DATABASE_URL`, `TZ` o `WEB_BASE_URL`, la API no arranca y dice
-cuál falta. La documentación interactiva de la API está en
+Si falta `DATABASE_URL`, `TZ`, `WEB_BASE_URL` o `BOT_API_KEY`, la API no
+arranca y dice cuál falta. `BOT_API_KEY` es el secreto que comparten la API
+y el bot; debe tener al menos 32 caracteres y se genera con
+`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. La documentación interactiva de la API está en
 http://localhost:8000/docs.
 
 ## Usuarios, espacios e invitaciones
@@ -244,6 +247,50 @@ curl 'localhost:8000/spaces/1/summary?period=2026-11' \
 - `remaining` negativo: el presupuesto se excedió.
 - `total.spent` suma todos los gastos del mes, también los de categorías
   sin presupuesto; `total.budget` suma solo los presupuestos que existen.
+
+## Bot de Telegram
+El bot registra gastos conversando: pregunta el monto, el espacio (si tienes
+varios), la categoría, el tipo de pago, la fecha y una descripción opcional,
+y te muestra todo antes de guardarlo. Nada se registra hasta que tocas
+**Confirmar**. Solo atiende chats privados.
+
+**1. Crear el bot.** Habla con [@BotFather](https://t.me/BotFather) en
+Telegram, envía `/newbot` y copia el token que te da en
+`TELEGRAM_BOT_TOKEN` de `.env`. Pon también `API_URL`, `BOT_API_KEY` (la
+misma que usa la API) y `TZ`.
+
+**2. Arrancar.** En dos terminales:
+
+```sh
+make run-api
+make run-bot   # se conecta a Telegram y espera mensajes
+```
+
+**3. Vincular tu chat.** El bot solo atiende chats vinculados a una cuenta
+de gastito. Pide un código con tu sesión (dura 10 minutos y sirve una vez):
+
+```sh
+curl -X POST localhost:8000/telegram/link-codes \
+  -H 'Authorization: Bearer <token de Ana>'
+# {"code": "YJ31-8F5C", "expires_at": "..."}
+```
+
+y envíaselo al bot: `/vincular YJ31-8F5C`. Responde con el correo de la
+cuenta vinculada. `/desvincular` lo deshace. Cuando exista la web, el
+código se pedirá desde ahí. Cómo funciona la vinculación:
+[ADR 0009](docs/adr/0009-vinculacion-del-chat-y-llave-del-bot.md).
+
+**4. Registrar un gasto.** Escribe `/gasto`, `/gasto 20000` o solo el
+monto (`20.000` o `$20.000`, en pesos enteros y sin decimales). Al
+confirmar, el bot te dice cómo va el presupuesto de esa categoría:
+
+```
+Gasto registrado: $ 20.000 en Comida.
+Comida: llevas $ 412.000 de $ 400.000 en noviembre. Te pasaste por $ 12.000.
+```
+
+`/cancelar` descarta el gasto en cualquier paso, y un gasto sin respuesta
+durante 10 minutos se descarta solo. `/ayuda` muestra los comandos.
 
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.

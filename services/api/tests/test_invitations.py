@@ -12,7 +12,7 @@ from app.models import Invitation, Membership, User
 from app.routers import invitations
 from app.routers.invitations import claim_invitation, find_valid_invitation
 from app.security import hash_token
-from tests.conftest import WEB_BASE_URL, token_from
+from tests.conftest import BOT_API_KEY, WEB_BASE_URL, token_from
 
 Login = Callable[..., dict[str, str]]
 
@@ -116,7 +116,12 @@ def test_trailing_slash_in_web_base_url_does_not_double_it(
     client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     configured = load_settings(
-        {"DATABASE_URL": "sqlite://", "TZ": "UTC", "WEB_BASE_URL": f"{WEB_BASE_URL}/"}
+        {
+            "DATABASE_URL": "sqlite://",
+            "TZ": "UTC",
+            "WEB_BASE_URL": f"{WEB_BASE_URL}/",
+            "BOT_API_KEY": BOT_API_KEY,
+        }
     )
     monkeypatch.setattr(invitations, "settings", configured)
     ana = login("ana@example.com")

@@ -7,7 +7,15 @@ from fastapi import FastAPI
 # en la primera petición, si falta una variable obligatoria (RF-33).
 from app.config import settings  # noqa: F401
 from app.db import create_all, engine
-from app.routers import auth, budgets, categories, expenses, invitations, spaces
+from app.routers import (
+    auth,
+    budgets,
+    categories,
+    expenses,
+    invitations,
+    spaces,
+    telegram,
+)
 
 
 @asynccontextmanager
@@ -24,6 +32,7 @@ app.include_router(categories.router)
 app.include_router(expenses.router)
 app.include_router(invitations.router)
 app.include_router(spaces.router)
+app.include_router(telegram.router)
 
 
 @app.get("/health")

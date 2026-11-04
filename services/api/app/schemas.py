@@ -363,3 +363,29 @@ class SummaryOut(BaseModel):
     period: str
     categories: list[CategorySummaryOut]
     total: TotalSummaryOut
+
+
+# --- Telegram (spec 005) ---
+
+
+class LinkCodeOut(BaseModel):
+    # El código en claro solo aparece en esta respuesta: la base de datos
+    # guarda su hash (RF-2).
+    code: str
+    expires_at: datetime
+
+
+class ChatIn(BaseModel):
+    # Estricto: `"123"` o `true` no son un chat de Telegram.
+    chat_id: StrictInt
+
+
+class ChatLinkIn(ChatIn):
+    # Tope generoso para no procesar textos enormes; el formato lo resuelve
+    # `normalize_link_code`.
+    code: str = Field(max_length=64)
+
+
+class ChatLinkOut(BaseModel):
+    # El correo del usuario vinculado, para confirmarlo en el chat (RF-3).
+    email: str
