@@ -94,7 +94,7 @@ rechazando una eliminada con su propio mensaje.
 - Hecho cuando: los tests pasan.
 - RF: RF-2, RF-3, RF-4, RF-6, RF-10, RF-11; base de RF-13.
 
-## [ ] T5 — Rutas de rubros
+## [x] T5 — Rutas de rubros
 `app/routers/budget_items.py` con `POST`, `PATCH` y `DELETE`, montado en
 `main.py`.
 
