@@ -7,7 +7,7 @@
   código nuevo (T3 a T9), contraer el esquema (T10) y cerrar (T11 a T13).
   Cada tarea deja la API funcionando.
 
-## [ ] T1 — Alembic y migración inicial
+## [x] T1 — Alembic y migración inicial
 `alembic` en `pyproject.toml`; `alembic.ini`; `app/migrations/` con
 `env.py` (conexión compartida, `render_as_batch=True`) y la migración
 `0001_baseline` idempotente, que también borra las tablas de Telegram;

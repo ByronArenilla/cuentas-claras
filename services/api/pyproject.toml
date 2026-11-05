@@ -8,6 +8,9 @@ dependencies = [
     "uvicorn",
     "sqlalchemy",
     "argon2-cffi",
+    # Migraciones del esquema (spec 008, ADR 0011). Es de ejecución porque la
+    # API aplica las pendientes al arrancar.
+    "alembic",
 ]
 
 [project.optional-dependencies]
