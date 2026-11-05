@@ -5,28 +5,21 @@
 #   make install PYTHON=python3.12
 PYTHON ?= python3
 
+# Por ahora la API es el único servicio con código Python: el bot se retiró
+# en la spec 007 (ADR 0010) y la web llega con la 010.
 API_DIR := services/api
 API_VENV := $(API_DIR)/.venv
 API_BIN := $(API_VENV)/bin
 
-# Cada servicio tiene su propio entorno virtual y sus propias dependencias
-# (spec 005): el bot no necesita SQLAlchemy y la API no necesita Telegram.
-BOT_DIR := services/bot
-BOT_VENV := $(BOT_DIR)/.venv
-BOT_BIN := $(BOT_VENV)/bin
-
 # Estos targets no generan archivos con su nombre: se ejecutan siempre.
-.PHONY: install run-api run-bot test lint
+.PHONY: install run-api test lint
 
-# Crea el entorno virtual de cada servicio (si no existe) e instala cada uno
-# en modo editable junto con sus herramientas de desarrollo.
+# Crea el entorno virtual de la API (si no existe) y la instala en modo
+# editable junto con sus herramientas de desarrollo.
 install:
 	test -d $(API_VENV) || $(PYTHON) -m venv $(API_VENV)
 	$(API_BIN)/pip install --upgrade pip
 	$(API_BIN)/pip install -e "$(API_DIR)[dev]"
-	test -d $(BOT_VENV) || $(PYTHON) -m venv $(BOT_VENV)
-	$(BOT_BIN)/pip install --upgrade pip
-	$(BOT_BIN)/pip install -e "$(BOT_DIR)[dev]"
 
 # Carga .env (si existe) en el entorno de la receta: `set -a` exporta cada
 # variable que el shell define al leerlo con `.`. Los tests no lo usan: su
@@ -42,21 +35,10 @@ run-api:
 		&& .venv/bin/python -c "import app.config" \
 		&& .venv/bin/uvicorn app.main:app --reload --port 8000
 
-# Igual que run-api: primero se comprueba la configuración, para que una
-# variable que falta se nombre y make se detenga. `python -m bot` ejecuta
-# bot/__main__.py, que se conecta a Telegram y espera mensajes (polling).
-run-bot:
-	$(LOAD_ENV); cd $(BOT_DIR) \
-		&& .venv/bin/python -c "import os; from bot.config import load_settings; load_settings(os.environ)" \
-		&& .venv/bin/python -m bot
-
-# Los tests de cada servicio, en su carpeta y con su entorno. Si falla la
-# API, make se detiene sin probar el bot.
+# Los tests de la API, en su carpeta y con su entorno.
 test:
 	cd $(API_DIR) && .venv/bin/pytest
-	cd $(BOT_DIR) && .venv/bin/pytest
 
 # Lint y formato en modo comprobación: no modifica archivos.
 lint:
 	cd $(API_DIR) && .venv/bin/ruff check . && .venv/bin/ruff format --check .
-	cd $(BOT_DIR) && .venv/bin/ruff check . && .venv/bin/ruff format --check .

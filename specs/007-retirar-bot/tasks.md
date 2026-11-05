@@ -27,7 +27,7 @@ Router, modelos, esquemas, funciones de vinculación, `bot_client` y
   verde con las mismas aserciones.
 - RF: RF-1 a RF-6.
 
-## [ ] T2 — Quitar el servicio del bot
+## [x] T2 — Quitar el servicio del bot
 Borrar `services/bot/`; el `Makefile` y `.env.example` quedan solo con la
 API.
 
