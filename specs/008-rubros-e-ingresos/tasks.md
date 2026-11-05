@@ -156,7 +156,7 @@ rutas de gastos con las reglas de "Editar un gasto" del plan.
 - Hecho cuando: los tests pasan.
 - RF: RF-17 a RF-22, RF-42.
 
-## [ ] T8 — Resumen nuevo
+## [x] T8 — Resumen nuevo
 `app/summary.py` reescrito (`spent_by_item`, `build_summary`) con el
 `SummaryOut` nuevo; `app/routers/plan.py` con `GET /summary`. Sale
 `app/routers/budgets.py` y con él el `PUT` de la 004.

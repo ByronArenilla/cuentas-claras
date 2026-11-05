@@ -331,7 +331,7 @@ class ExpenseOut(BaseModel):
     budget_item_id: int | None
 
 
-# --- Presupuesto y resumen (spec 004) ---
+# --- Periodo (spec 004) ---
 
 # Lo usan también el listado de gastos y el resumen: un periodo mal escrito
 # recibe el mismo mensaje en toda la API (plan 004).
@@ -350,48 +350,6 @@ def check_period(value: object) -> object:
 
 
 Period = Annotated[str, BeforeValidator(check_period)]
-
-
-class BudgetIn(BaseModel):
-    # Sin `space_id` ni `category_id`: salen de la ruta.
-    # Cualquier mes válido, pasado, actual o futuro (RF-10, decisión 3), y
-    # por defecto el actual en `TZ`, calculado al validar (RF-2).
-    period: Period = Field(default_factory=lambda: dates.period_of(dates.today()))
-    # Obligatorio aunque admite `null`: quitar el presupuesto exige escribir
-    # `"amount": null`, así un cuerpo `{}` no lo quita por accidente (RF-6).
-    amount: Amount | None
-
-
-class BudgetOut(BaseModel):
-    category_id: int
-    period: str
-    # Nulo si desde ese periodo la categoría queda sin presupuesto.
-    amount: int | None
-
-
-class CategorySummaryOut(BaseModel):
-    # Con el nombre de la categoría: el resumen es lo que la web muestra tal
-    # cual (plan 004).
-    category_id: int
-    name: str
-    budget: int | None
-    spent: int
-    # Negativo si se excedió; nulo si no hay presupuesto (RF-13).
-    remaining: int | None
-
-
-class TotalSummaryOut(BaseModel):
-    # Nulos si ninguna categoría tiene presupuesto (RF-14).
-    budget: int | None
-    spent: int
-    remaining: int | None
-
-
-class SummaryOut(BaseModel):
-    # Solo enteros en la unidad mínima de la moneda (RF-16, principio 6).
-    period: str
-    categories: list[CategorySummaryOut]
-    total: TotalSummaryOut
 
 
 # --- Plan del mes: rubros, ingresos y copia (spec 008) ---
@@ -516,3 +474,55 @@ class IncomeOut(BaseModel):
 class PlanCopyIn(BaseModel):
     # El mes destino; el origen es el inmediatamente anterior (decisión 9).
     period: Period = Field(default_factory=current_period)
+
+
+# --- Resumen del mes (spec 008, reemplaza al de la 004) ---
+# Solo enteros en la unidad mínima de la moneda (RF-24, principio 6). Ningún
+# campo es nulo: sin plan, las listas salen vacías y los montos en 0 (RF-25).
+
+
+class IncomeSummaryOut(BaseModel):
+    id: int
+    name: str
+    amount: int
+
+
+class ItemSummaryOut(BaseModel):
+    id: int
+    name: str
+    category_id: int
+    planned: int
+    spent: int
+    # Negativo si se excedió.
+    remaining: int
+
+
+class CategorySummaryOut(BaseModel):
+    # Con el nombre: el resumen es lo que la web muestra tal cual (plan 004).
+    category_id: int
+    name: str
+    # Suma de sus rubros del mes; 0 si no tiene.
+    planned: int
+    # Todos sus gastos del mes, planeados o no.
+    spent: int
+    # Solo salen eliminadas si tienen rubros o gastos en el mes (decisión 18).
+    deleted: bool
+
+
+class TotalSummaryOut(BaseModel):
+    income: int
+    planned: int
+    spent_planned: int
+    spent_unplanned: int
+    spent: int
+    # Ingresos menos planeado, y ingresos menos gastado: pueden ser negativos.
+    unassigned: int
+    balance: int
+
+
+class SummaryOut(BaseModel):
+    period: str
+    incomes: list[IncomeSummaryOut]
+    budget_items: list[ItemSummaryOut]
+    categories: list[CategorySummaryOut]
+    total: TotalSummaryOut

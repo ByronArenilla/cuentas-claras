@@ -10,11 +10,11 @@ from app.db import engine, run_migrations
 from app.routers import (
     auth,
     budget_items,
-    budgets,
     categories,
     expenses,
     incomes,
     invitations,
+    plan,
     spaces,
 )
 
@@ -30,11 +30,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="gastito API", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(budget_items.router)
-app.include_router(budgets.router)
 app.include_router(categories.router)
 app.include_router(expenses.router)
 app.include_router(incomes.router)
 app.include_router(invitations.router)
+app.include_router(plan.router)
 app.include_router(spaces.router)
 
 

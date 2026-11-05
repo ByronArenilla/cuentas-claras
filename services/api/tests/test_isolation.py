@@ -14,13 +14,12 @@ import pytest
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from httpx import Response
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app import dates, routers
 from app.deps import member_space
-from app.models import Budget, Category, Expense, User
+from app.models import Category, Expense, User
 from app.models import Session as SessionRow
 
 Login = Callable[..., dict[str, str]]
@@ -374,140 +373,9 @@ def test_expenses_of_a_member_who_leaves_stay_with_their_author(
 
 
 # --- Presupuestos y resumen (spec 004) ---
-
-
-def first_category_id(
-    client: TestClient, headers: dict[str, str], space_id: int
-) -> int:
-    response = client.get(f"/spaces/{space_id}/categories", headers=headers)
-    return response.json()[0]["id"]
-
-
-def put_budget(
-    client: TestClient,
-    headers: dict[str, str],
-    space_id: int,
-    category_id: int,
-    amount: int = 400_000,
-) -> Response:
-    return client.put(
-        f"/spaces/{space_id}/budgets/{category_id}",
-        json={"period": "2026-10", "amount": amount},
-        headers=headers,
-    )
-
-
-def summary_total(client: TestClient, headers: dict[str, str], space_id: int) -> dict:
-    response = client.get(
-        f"/spaces/{space_id}/summary", params={"period": "2026-10"}, headers=headers
-    )
-    assert response.status_code == 200
-    return response.json()["total"]
-
-
-def count_budgets(engine: Engine, space_id: int) -> int:
-    query = select(func.count()).where(Budget.space_id == space_id)
-    with Session(engine) as db:
-        return db.scalar(query)
-
-
-@pytest.mark.usefixtures("october")
-def test_users_in_different_spaces_cannot_touch_each_others_budgets(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    # Criterio 6 (RF-17, RF-18): ni fijar presupuestos ni ver el resumen del
-    # espacio ajeno, y los datos de una no aparecen en el resumen de la otra.
-    ana, bea = login("ana@example.com"), login("bea@example.com")
-    ana_space, bea_space = personal(client, ana), personal(client, bea)
-    ana_category = first_category_id(client, ana, ana_space)
-    bea_category = first_category_id(client, bea, bea_space)
-    put_budget(client, ana, ana_space, ana_category, 400_000).raise_for_status()
-    put_budget(client, bea, bea_space, bea_category, 900_000).raise_for_status()
-    add_expense(client, ana, ana_space, 20_000)
-    add_expense(client, bea, bea_space, 70_000)
-
-    for headers, foreign_space, own_space, foreign_category in (
-        (ana, bea_space, ana_space, bea_category),
-        (bea, ana_space, bea_space, ana_category),
-    ):
-        by_foreign_route = {
-            "fijar": put_budget(client, headers, foreign_space, foreign_category, 1),
-            "resumen": client.get(f"/spaces/{foreign_space}/summary", headers=headers),
-        }
-        for operation, response in by_foreign_route.items():
-            assert response.status_code == 404, operation
-            assert response.json()["detail"] == "Espacio no encontrado.", operation
-
-        # La categoría ajena tampoco se alcanza desde la ruta del espacio propio.
-        response = put_budget(client, headers, own_space, foreign_category, 1)
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Categoría no encontrada."
-
-    # Nada cambió y cada resumen solo cuenta lo suyo.
-    assert count_budgets(engine, ana_space) == count_budgets(engine, bea_space) == 1
-    assert summary_total(client, ana, ana_space) == {
-        "budget": 400_000,
-        "spent": 20_000,
-        "remaining": 380_000,
-    }
-    assert summary_total(client, bea, bea_space) == {
-        "budget": 900_000,
-        "spent": 70_000,
-        "remaining": 830_000,
-    }
-
-
-def test_category_of_space_b_by_route_of_space_a_is_not_found(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    # Criterio 7 (RF-9): Ana es miembro de los dos espacios, pero la categoría
-    # solo existe en la ruta de su espacio.
-    ana = login("ana@example.com")
-    space_a = create_space(client, ana, "Casa")
-    space_b = create_space(client, ana, "Viajes")
-    category_b = first_category_id(client, ana, space_b)
-
-    response = put_budget(client, ana, space_a, category_b)
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Categoría no encontrada."
-    assert count_budgets(engine, space_a) == count_budgets(engine, space_b) == 0
-
-
-@pytest.mark.usefixtures("october")
-def test_deleting_a_space_deletes_only_its_budgets(
-    client: TestClient, engine: Engine, login: Login
-) -> None:
-    # Criterio 9, primera parte (RF-20): mismo usuario, dos espacios.
-    ana = login("ana@example.com")
-    casa = create_space(client, ana, "Casa")
-    viajes = create_space(client, ana, "Viajes")
-    put_budget(client, ana, casa, first_category_id(client, ana, casa))
-    put_budget(client, ana, viajes, first_category_id(client, ana, viajes))
-    add_expense(client, ana, viajes)
-
-    response = client.delete(
-        f"/spaces/{viajes}", params={"confirm": "Viajes"}, headers=ana
-    )
-
-    assert response.status_code == 204
-    assert count_budgets(engine, viajes) == 0
-    assert count_budgets(engine, casa) == 1
-    assert summary_total(client, ana, casa)["budget"] == 400_000
-
-
-@pytest.mark.usefixtures("october")
-def test_budgets_stay_when_a_member_leaves(
-    client: TestClient, shared_space: SharedSpace
-) -> None:
-    # Criterio 9, segunda parte (RF-19): salir solo borra la membresía.
-    space_id, ana, bea = shared_space
-    put_budget(client, bea, space_id, first_category_id(client, bea, space_id))
-
-    response = client.delete(f"/spaces/{space_id}/members/me", headers=bea)
-
-    assert response.status_code == 204
-    assert summary_total(client, ana, space_id)["budget"] == 400_000
+# Salieron con la ruta de presupuestos de la 004 (spec 008, RF-27). Los
+# reemplazan los tests de rubros, ingresos, copia y resumen de más abajo
+# (spec 008, T11).
 
 
 @pytest.mark.usefixtures("october")

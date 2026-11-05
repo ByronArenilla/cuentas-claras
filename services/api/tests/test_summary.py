@@ -1,14 +1,15 @@
-"""Presupuesto vigente y resumen, sin HTTP (spec 004, T3; principio 10)."""
+"""Resumen del plan del mes, sin HTTP (spec 008, RF-23 a RF-25; principio 10)."""
 
 from datetime import date
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Budget, Category, Expense, Space, User
-from app.summary import build_summary, effective_budgets, spent_by_category
+from app.models import BudgetItem, Category, Expense, Income, Space, User, utc_now
+from app.summary import build_summary, spent_by_category, spent_by_item
 
-OCTOBER = (date(2026, 10, 1), date(2026, 11, 1))
+NOVEMBER = (date(2026, 11, 1), date(2026, 12, 1))
 
 
 @pytest.fixture
@@ -34,28 +35,51 @@ def add_category(session: Session, space: Space, name: str) -> Category:
     return category
 
 
-def set_budget(
-    session: Session, category: Category, period: str, amount: int | None
-) -> None:
-    year, month = map(int, period.split("-"))
-    session.add(
-        Budget(
-            space_id=category.space_id,
-            category_id=category.id,
-            starts_on=date(year, month, 1),
-            amount=amount,
-        )
+def add_item(
+    session: Session,
+    category: Category,
+    name: str,
+    amount: int,
+    month: date = NOVEMBER[0],
+) -> BudgetItem:
+    item = BudgetItem(
+        space_id=category.space_id,
+        period_start=month,
+        name=name,
+        category_id=category.id,
+        amount=amount,
     )
+    session.add(item)
     session.flush()
+    return item
+
+
+def add_income(
+    session: Session, space: Space, name: str, amount: int, month: date = NOVEMBER[0]
+) -> Income:
+    income = Income(space_id=space.id, period_start=month, name=name, amount=amount)
+    session.add(income)
+    session.flush()
+    return income
 
 
 def spend(
-    session: Session, category: Category, user: User, amount: int, day: date
+    session: Session,
+    user: User,
+    amount: int,
+    day: date,
+    *,
+    item: BudgetItem | None = None,
+    category: Category | None = None,
 ) -> None:
+    """Un gasto planeado (con `item`) o no planeado (con `category`)."""
+    category_id = item.category_id if item is not None else category.id
+    space_id = item.space_id if item is not None else category.space_id
     session.add(
         Expense(
-            space_id=category.space_id,
-            category_id=category.id,
+            space_id=space_id,
+            category_id=category_id,
+            budget_item_id=item.id if item is not None else None,
             created_by=user.id,
             amount=amount,
             payment_type="debit",
@@ -65,234 +89,265 @@ def spend(
     session.flush()
 
 
-def budget_in(session: Session, category: Category, period: str) -> int | None:
-    year, month = map(int, period.split("-"))
-    budgets = effective_budgets(session, category.space_id, date(year, month, 1))
-    return budgets.get(category.id)
+@pytest.fixture
+def november(session: Session, space: Space, user: User) -> dict:
+    """El mes del criterio 1.
 
-
-# --- Presupuesto vigente ---
-
-
-def test_a_budget_rules_from_its_period_onwards(session: Session, space: Space) -> None:
-    # Criterio 1, primera parte (RF-3).
+    - Ingresos: Salario 5.000.000.
+    - Rubros: Arriendo (Hogar) 1.500.000 y Mercado (Comida) 800.000.
+    - Gastos planeados: Arriendo 1.500.000; Mercado 412.000 + 400.000, que lo
+      exceden en 12.000.
+    - Gastos no planeados: Transporte 38.000 y Comida 10.000.
+    """
+    hogar = add_category(session, space, "Hogar")
     comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-09", 400_000)
-
-    assert budget_in(session, comida, "2026-08") is None
-    for period in ("2026-09", "2026-10", "2026-11", "2026-12", "2027-06"):
-        assert budget_in(session, comida, period) == 400_000
-
-
-def test_a_later_change_does_not_touch_earlier_periods(
-    session: Session, space: Space
-) -> None:
-    # Criterio 1, segunda parte (RF-3, RF-4).
-    comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-09", 400_000)
-    set_budget(session, comida, "2026-11", 500_000)
-
-    assert budget_in(session, comida, "2026-09") == 400_000
-    assert budget_in(session, comida, "2026-10") == 400_000
-    assert budget_in(session, comida, "2026-11") == 500_000
-    assert budget_in(session, comida, "2026-12") == 500_000
-
-
-def test_an_earlier_change_does_not_touch_later_changes(
-    session: Session, space: Space
-) -> None:
-    # RF-4: fijar un mes pasado no pisa los meses desde los que ya hay otro,
-    # aunque se guarde después.
-    comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-11", 500_000)
-    set_budget(session, comida, "2026-09", 400_000)
-
-    assert budget_in(session, comida, "2026-10") == 400_000
-    assert budget_in(session, comida, "2026-11") == 500_000
-
-
-def test_removing_a_budget_rules_until_the_next_change(
-    session: Session, space: Space
-) -> None:
-    # Criterio 2 (RF-6): una fila nula quita el presupuesto desde ese mes.
-    comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-09", 400_000)
-    set_budget(session, comida, "2026-11", 500_000)
-    set_budget(session, comida, "2026-12", None)
-
-    assert budget_in(session, comida, "2026-11") == 500_000
-    assert budget_in(session, comida, "2026-12") is None
-    assert budget_in(session, comida, "2027-01") is None
-
-    set_budget(session, comida, "2027-02", 300_000)
-    assert budget_in(session, comida, "2027-02") == 300_000
-
-
-def test_each_category_has_its_own_budget(session: Session, space: Space) -> None:
-    comida, ocio = (
-        add_category(session, space, "Comida"),
-        add_category(session, space, "Ocio"),
-    )
-    set_budget(session, comida, "2026-09", 400_000)
-    set_budget(session, ocio, "2026-10", 100_000)
-
-    assert effective_budgets(session, space.id, date(2026, 9, 1)) == {
-        comida.id: 400_000
-    }
-    assert effective_budgets(session, space.id, date(2026, 10, 1)) == {
-        comida.id: 400_000,
-        ocio.id: 100_000,
+    transporte = add_category(session, space, "Transporte")
+    salud = add_category(session, space, "Salud")
+    salario = add_income(session, space, "Salario", 5_000_000)
+    arriendo = add_item(session, hogar, "Arriendo", 1_500_000)
+    mercado = add_item(session, comida, "Mercado", 800_000)
+    spend(session, user, 1_500_000, date(2026, 11, 1), item=arriendo)
+    spend(session, user, 412_000, date(2026, 11, 3), item=mercado)
+    spend(session, user, 400_000, date(2026, 11, 30), item=mercado)
+    spend(session, user, 38_000, date(2026, 11, 10), category=transporte)
+    spend(session, user, 10_000, date(2026, 11, 11), category=comida)
+    # Fuera de noviembre: no cuentan.
+    spend(session, user, 99_000, date(2026, 10, 31), category=comida)
+    spend(session, user, 99_000, date(2026, 12, 1), category=comida)
+    return {
+        "hogar": hogar,
+        "comida": comida,
+        "transporte": transporte,
+        "salud": salud,
+        "salario": salario,
+        "arriendo": arriendo,
+        "mercado": mercado,
     }
 
 
 # --- Gastado ---
 
 
-def test_spent_only_adds_the_expenses_of_the_period(
-    session: Session, space: Space, user: User
+def test_spent_by_item_adds_only_planned_expenses_of_the_month(
+    session: Session, space: Space, november: dict
 ) -> None:
-    # Criterio 3, bordes del mes (RF-12, regla de RF-9 de la 003).
-    comida = add_category(session, space, "Comida")
-    spend(session, comida, user, 1_000, date(2026, 9, 30))
-    spend(session, comida, user, 20_000, date(2026, 10, 1))
-    spend(session, comida, user, 30_000, date(2026, 10, 31))
-    spend(session, comida, user, 4_000, date(2026, 11, 1))
+    spent = spent_by_item(session, space.id, *NOVEMBER)
 
-    assert spent_by_category(session, space.id, *OCTOBER) == {comida.id: 50_000}
-
-
-def test_spent_is_an_int(session: Session, space: Space, user: User) -> None:
-    # RF-16: `SUM` de PostgreSQL devolvería `Decimal` (plan 004).
-    comida = add_category(session, space, "Comida")
-    spend(session, comida, user, 20_000, date(2026, 10, 1))
-
-    total = spent_by_category(session, space.id, *OCTOBER)[comida.id]
-    assert type(total) is int
+    assert spent == {
+        november["arriendo"].id: 1_500_000,
+        november["mercado"].id: 812_000,
+    }
+    assert all(type(value) is int for value in spent.values())
 
 
-# --- Resumen ---
-
-
-def test_summary_lists_every_category_with_budget_spent_and_remaining(
-    session: Session, space: Space, user: User
+def test_spent_by_category_adds_planned_and_unplanned(
+    session: Session, space: Space, november: dict
 ) -> None:
-    # Criterio 3 (RF-11 a RF-14).
-    comida = add_category(session, space, "Comida")
-    transporte = add_category(session, space, "Transporte")
-    ocio = add_category(session, space, "Ocio")
-    salud = add_category(session, space, "Salud")
-    set_budget(session, comida, "2026-09", 400_000)
-    set_budget(session, ocio, "2026-10", 100_000)
-    spend(session, comida, user, 412_000, date(2026, 10, 15))
-    spend(session, transporte, user, 38_000, date(2026, 10, 2))
-    spend(session, salud, user, 9_000, date(2026, 11, 1))  # Otro mes.
+    spent = spent_by_category(session, space.id, *NOVEMBER)
 
-    summary = build_summary(session, space.id, "2026-10")
-
-    assert summary.period == "2026-10"
-    assert [row.model_dump() for row in summary.categories] == [
-        # Excedida: lo que queda es negativo (RF-13).
-        {
-            "category_id": comida.id,
-            "name": "Comida",
-            "budget": 400_000,
-            "spent": 412_000,
-            "remaining": -12_000,
-        },
-        # Sin presupuesto: no hay "lo que queda".
-        {
-            "category_id": transporte.id,
-            "name": "Transporte",
-            "budget": None,
-            "spent": 38_000,
-            "remaining": None,
-        },
-        # Sin gastos: gastado 0 (RF-12).
-        {
-            "category_id": ocio.id,
-            "name": "Ocio",
-            "budget": 100_000,
-            "spent": 0,
-            "remaining": 100_000,
-        },
-        # Ni presupuesto ni gastos en el mes: aparece igual (decisión 2).
-        {
-            "category_id": salud.id,
-            "name": "Salud",
-            "budget": None,
-            "spent": 0,
-            "remaining": None,
-        },
-    ]
-    # El total gastado incluye las categorías sin presupuesto (RF-14).
-    assert summary.total.model_dump() == {
-        "budget": 500_000,
-        "spent": 450_000,
-        "remaining": 50_000,
+    assert spent == {
+        november["hogar"].id: 1_500_000,
+        november["comida"].id: 822_000,
+        november["transporte"].id: 38_000,
     }
 
 
-def test_summary_without_any_budget_has_no_total_budget(
+# --- Resumen (criterio 1) ---
+
+
+def test_the_summary_of_the_month(
+    session: Session, space: Space, november: dict
+) -> None:
+    summary = build_summary(session, space.id, "2026-11").model_dump()
+
+    assert summary["period"] == "2026-11"
+    assert summary["incomes"] == [
+        {"id": november["salario"].id, "name": "Salario", "amount": 5_000_000}
+    ]
+    assert summary["budget_items"] == [
+        {
+            "id": november["arriendo"].id,
+            "name": "Arriendo",
+            "category_id": november["hogar"].id,
+            "planned": 1_500_000,
+            "spent": 1_500_000,
+            "remaining": 0,
+        },
+        {
+            "id": november["mercado"].id,
+            "name": "Mercado",
+            "category_id": november["comida"].id,
+            "planned": 800_000,
+            "spent": 812_000,
+            "remaining": -12_000,
+        },
+    ]
+    assert summary["categories"] == [
+        {
+            "category_id": november["hogar"].id,
+            "name": "Hogar",
+            "planned": 1_500_000,
+            "spent": 1_500_000,
+            "deleted": False,
+        },
+        {
+            "category_id": november["comida"].id,
+            "name": "Comida",
+            "planned": 800_000,
+            "spent": 822_000,
+            "deleted": False,
+        },
+        {
+            "category_id": november["transporte"].id,
+            "name": "Transporte",
+            "planned": 0,
+            "spent": 38_000,
+            "deleted": False,
+        },
+        {
+            "category_id": november["salud"].id,
+            "name": "Salud",
+            "planned": 0,
+            "spent": 0,
+            "deleted": False,
+        },
+    ]
+    assert summary["total"] == {
+        "income": 5_000_000,
+        "planned": 2_300_000,
+        "spent_planned": 2_312_000,
+        "spent_unplanned": 48_000,
+        "spent": 2_360_000,
+        "unassigned": 2_700_000,
+        "balance": 2_640_000,
+    }
+
+
+def test_unassigned_and_balance_can_be_negative(
     session: Session, space: Space, user: User
 ) -> None:
-    # RF-14: sin presupuestos no hay total presupuestado ni total que queda.
-    comida = add_category(session, space, "Comida")
-    spend(session, comida, user, 20_000, date(2026, 10, 1))
+    # RF-24: se planeó y se gastó más de lo que entra.
+    hogar = add_category(session, space, "Hogar")
+    add_income(session, space, "Salario", 1_000_000)
+    item = add_item(session, hogar, "Arriendo", 1_500_000)
+    spend(session, user, 1_200_000, date(2026, 11, 5), item=item)
 
-    total = build_summary(session, space.id, "2026-10").total
+    total = build_summary(session, space.id, "2026-11").total
 
-    assert total.model_dump() == {"budget": None, "spent": 20_000, "remaining": None}
+    assert total.unassigned == -500_000
+    assert total.balance == -200_000
 
 
-def test_a_removed_budget_counts_as_no_budget_in_the_summary(
+def test_all_amounts_are_ints(session: Session, space: Space, november: dict) -> None:
+    summary = build_summary(session, space.id, "2026-11").model_dump()
+    amounts = [
+        *[row["amount"] for row in summary["incomes"]],
+        *[
+            row[key]
+            for row in summary["budget_items"]
+            for key in ("planned", "spent", "remaining")
+        ],
+        *[row[key] for row in summary["categories"] for key in ("planned", "spent")],
+        *summary["total"].values(),
+    ]
+
+    assert all(type(amount) is int for amount in amounts)
+
+
+# --- Mes sin plan (RF-25, decisión 10) ---
+
+
+def test_a_month_without_plan_is_empty_and_creates_nothing(
+    session: Session, space: Space, november: dict
+) -> None:
+    summary = build_summary(session, space.id, "2027-01").model_dump()
+
+    assert summary["incomes"] == []
+    assert summary["budget_items"] == []
+    assert [row["planned"] for row in summary["categories"]] == [0, 0, 0, 0]
+    assert summary["total"] == {
+        "income": 0,
+        "planned": 0,
+        "spent_planned": 0,
+        "spent_unplanned": 0,
+        "spent": 0,
+        "unassigned": 0,
+        "balance": 0,
+    }
+    assert session.scalar(select(func.count()).select_from(BudgetItem)) == 2
+    assert session.scalar(select(func.count()).select_from(Income)) == 1
+
+
+def test_a_space_without_categories_has_an_empty_summary(
     session: Session, space: Space
 ) -> None:
-    comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-09", 400_000)
-    set_budget(session, comida, "2026-10", None)
-
-    summary = build_summary(session, space.id, "2026-10")
-
-    assert summary.categories[0].budget is None
-    assert summary.total.budget is None
-
-
-def test_summary_of_a_space_without_categories_is_empty(
-    session: Session, space: Space
-) -> None:
-    summary = build_summary(session, space.id, "2026-10")
+    summary = build_summary(session, space.id, "2026-11")
 
     assert summary.categories == []
-    assert summary.total.model_dump() == {"budget": None, "spent": 0, "remaining": None}
+    assert summary.total.spent == 0
 
 
-def test_summary_amounts_are_ints(session: Session, space: Space, user: User) -> None:
-    # RF-16, principio 6.
-    comida = add_category(session, space, "Comida")
-    set_budget(session, comida, "2026-10", 400_000)
-    spend(session, comida, user, 20_000, date(2026, 10, 1))
+# --- Categorías eliminadas (decisión 18, RF-40) ---
 
-    summary = build_summary(session, space.id, "2026-10")
-    row, total = summary.categories[0], summary.total
 
-    for value in (row.budget, row.spent, row.remaining, total.budget, total.spent):
-        assert type(value) is int
+def test_a_deleted_category_shows_only_where_it_has_data(
+    session: Session, space: Space, user: User
+) -> None:
+    mascotas = add_category(session, space, "Mascotas")
+    viajes = add_category(session, space, "Viajes")
+    add_item(session, mascotas, "Comida perro", 120_000)
+    spend(session, user, 50_000, date(2026, 10, 2), category=viajes)
+    mascotas.deleted_at = viajes.deleted_at = utc_now()
+    session.flush()
+
+    def rows(period: str) -> list[tuple[str, bool]]:
+        summary = build_summary(session, space.id, period)
+        return [(row.name, row.deleted) for row in summary.categories]
+
+    # Mascotas tiene un rubro en noviembre; Viajes, un gasto en octubre.
+    assert rows("2026-11") == [("Mascotas", True)]
+    assert rows("2026-10") == [("Viajes", True)]
+    assert rows("2026-12") == []
+
+
+def test_a_deleted_category_still_counts_in_the_totals(
+    session: Session, space: Space, user: User
+) -> None:
+    mascotas = add_category(session, space, "Mascotas")
+    item = add_item(session, mascotas, "Comida perro", 120_000)
+    spend(session, user, 130_000, date(2026, 11, 2), item=item)
+    mascotas.deleted_at = utc_now()
+    session.flush()
+
+    summary = build_summary(session, space.id, "2026-11")
+
+    assert summary.budget_items[0].remaining == -10_000
+    assert summary.total.planned == 120_000
+    assert summary.total.spent == 130_000
+
+
+# --- Aislamiento (RF-29) ---
 
 
 def test_nothing_from_another_space_is_counted(
-    session: Session, space: Space, user: User
+    session: Session, space: Space, user: User, november: dict
 ) -> None:
-    # RF-18: ni gastos, ni presupuestos, ni categorías de otro espacio.
     other = Space(name="Viajes")
     session.add(other)
     session.flush()
-    comida = add_category(session, space, "Comida")
-    foreign = add_category(session, other, "Comida")
-    set_budget(session, foreign, "2026-10", 900_000)
-    spend(session, foreign, user, 70_000, date(2026, 10, 5))
+    hoteles = add_category(session, other, "Hoteles")
+    add_income(session, other, "Salario", 9_000_000)
+    item = add_item(session, hoteles, "Hotel", 700_000)
+    spend(session, user, 650_000, date(2026, 11, 20), item=item)
 
-    assert effective_budgets(session, space.id, date(2026, 10, 1)) == {}
-    assert spent_by_category(session, space.id, *OCTOBER) == {}
-    summary = build_summary(session, space.id, "2026-10")
-    assert [row.category_id for row in summary.categories] == [comida.id]
-    assert summary.total.model_dump() == {"budget": None, "spent": 0, "remaining": None}
+    summary = build_summary(session, space.id, "2026-11")
+
+    assert [row.name for row in summary.categories] == [
+        "Hogar",
+        "Comida",
+        "Transporte",
+        "Salud",
+    ]
+    assert summary.total.income == 5_000_000
+    assert summary.total.planned == 2_300_000
+    assert summary.total.spent == 2_360_000
