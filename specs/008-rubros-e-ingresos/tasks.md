@@ -118,7 +118,7 @@ rechazando una eliminada con su propio mensaje.
   `{space_id}` sigue en verde.
 - RF: RF-1 a RF-9, RF-41, RF-42.
 
-## [ ] T6 — Rutas de ingresos
+## [x] T6 — Rutas de ingresos
 `app/routers/incomes.py` con `POST`, `PATCH` y `DELETE`, montado en
 `main.py`.
 
