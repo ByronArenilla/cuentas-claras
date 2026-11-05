@@ -1,5 +1,5 @@
 """Tablas de usuarios, espacios, membresías, invitaciones, sesiones, categorías,
-gastos, presupuestos, rubros e ingresos."""
+gastos, rubros e ingresos."""
 
 import unicodedata
 from datetime import UTC, date, datetime
@@ -198,40 +198,6 @@ class Expense(Base):
     spent_on: Mapped[date] = mapped_column(Date)
     description: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
-
-
-class Budget(Base):
-    """Presupuesto de una categoría desde un periodo en adelante (spec 004).
-
-    Cada fila es un cambio, no un mes: rige desde `starts_on` hasta el
-    siguiente cambio de la misma categoría (decisión 1). Una fila con
-    `amount` nulo deja la categoría sin presupuesto desde ese periodo
-    (decisión 4).
-    """
-
-    __tablename__ = "budgets"
-    __table_args__ = (
-        # No existe el presupuesto cero: "sin presupuesto" es nulo (RF-7).
-        CheckConstraint(
-            "amount IS NULL OR amount > 0", name="ck_budgets_amount_positive"
-        ),
-        # Un solo cambio por categoría y periodo, aunque lleguen dos
-        # peticiones a la vez (RF-5). Su índice, que empieza por `space_id`,
-        # también sirve para leer los presupuestos del espacio en el resumen.
-        UniqueConstraint("space_id", "category_id", "starts_on"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
-    # Sin `ondelete`, por la misma razón que en `Expense` (plan 003).
-    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
-    # Siempre el día 1 del periodo; solo lo escribe la API (plan 004).
-    starts_on: Mapped[date] = mapped_column(Date)
-    amount: Mapped[int | None] = mapped_column(BigInteger)
-    # Cuándo se fijó por última vez ese periodo. No es un historial.
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utc_now, onupdate=utc_now
-    )
 
 
 class BudgetItem(Base):

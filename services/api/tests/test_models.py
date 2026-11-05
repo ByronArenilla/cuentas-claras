@@ -6,7 +6,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Budget,
     BudgetItem,
     Category,
     Expense,
@@ -278,7 +277,7 @@ def test_deleting_space_cascades_to_its_expenses_and_categories(
     assert session.scalars(select(Category.space_id)).all() == [kept.id]
 
 
-# --- Presupuestos (spec 004) ---
+# --- Categorías (helper compartido) ---
 
 
 def make_category(session: Session, space: Space, name: str = "Comida") -> Category:
@@ -286,92 +285,6 @@ def make_category(session: Session, space: Space, name: str = "Comida") -> Categ
     session.add(category)
     session.flush()
     return category
-
-
-def make_budget(session: Session, category: Category, **fields: object) -> Budget:
-    """Presupuesto de `category` desde octubre de 2026, salvo que se indique otro."""
-    values: dict[str, object] = {
-        "space_id": category.space_id,
-        "category_id": category.id,
-        "starts_on": date(2026, 10, 1),
-        "amount": 400_000,
-        **fields,
-    }
-    budget = Budget(**values)
-    session.add(budget)
-    session.flush()
-    return budget
-
-
-def test_budget_is_saved_and_read_back(session: Session) -> None:
-    budget = make_budget(session, make_category(session, make_space(session)))
-    session.expire_all()
-
-    saved = session.get(Budget, budget.id)
-    assert saved.amount == 400_000
-    assert saved.starts_on == date(2026, 10, 1)
-    assert type(saved.starts_on) is date
-    assert saved.updated_at.tzinfo is UTC
-
-
-@pytest.mark.parametrize("amount", [None, 1_000_000_000_000])
-def test_budget_amount_can_be_null_or_one_trillion(
-    session: Session, amount: int | None
-) -> None:
-    # Nulo quita el presupuesto desde ese periodo (RF-6, decisión 4); el tope
-    # es el mismo que el de un gasto (RF-7).
-    category = make_category(session, make_space(session))
-    budget = make_budget(session, category, amount=amount)
-    session.expire_all()
-
-    assert session.get(Budget, budget.id).amount == amount
-
-
-@pytest.mark.parametrize("amount", [0, -1])
-def test_database_rejects_budget_not_greater_than_zero(
-    session: Session, amount: int
-) -> None:
-    # RF-7: no existe el presupuesto cero; última defensa tras la API.
-    category = make_category(session, make_space(session))
-
-    with pytest.raises(IntegrityError):
-        make_budget(session, category, amount=amount)
-
-
-def test_same_category_and_period_cannot_have_two_budgets(session: Session) -> None:
-    # RF-5: el índice único lo frena aunque lleguen dos peticiones a la vez.
-    category = make_category(session, make_space(session))
-    make_budget(session, category)
-
-    with pytest.raises(IntegrityError):
-        make_budget(session, category, amount=500_000)
-
-
-def test_same_period_is_allowed_in_another_category_or_space(
-    session: Session,
-) -> None:
-    casa, viajes = make_space(session, "Casa"), make_space(session, "Viajes")
-    make_budget(session, make_category(session, casa, "Comida"))
-    make_budget(session, make_category(session, casa, "Ocio"))
-    make_budget(session, make_category(session, viajes, "Comida"))
-
-    assert len(session.scalars(select(Budget)).all()) == 3
-
-
-def test_deleting_space_cascades_to_its_budgets(session: Session) -> None:
-    # RF-20. Con categorías, gastos y presupuestos a la vez: la cascada los
-    # quita en la misma sentencia y ninguna clave foránea choca.
-    user = make_user(session)
-    doomed, kept = make_space(session, "Casa"), make_space(session, "Viajes")
-    make_expense(session, doomed, user)
-    make_budget(session, make_category(session, doomed))
-    kept_budget = make_budget(session, make_category(session, kept))
-
-    session.execute(delete(Space).where(Space.id == doomed.id))
-    session.flush()
-
-    assert session.scalars(select(Budget.id)).all() == [kept_budget.id]
-    assert session.scalars(select(Expense.space_id)).all() == []
 
 
 # --- Rubros, ingresos y categorías eliminadas (spec 008) ---

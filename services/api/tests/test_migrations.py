@@ -17,7 +17,7 @@ from app.db import MigrationError, build_engine, run_migrations
 from app.models import Base
 from tests import old_schemas
 
-HEAD = "0002"
+HEAD = "0003"
 
 
 @pytest.fixture
@@ -214,3 +214,85 @@ def test_the_copied_expenses_table_keeps_its_constraints(file_engine: Engine) ->
 
     with file_engine.connect() as connection:
         assert connection.scalar(text("SELECT COUNT(*) FROM expenses")) == 0
+
+
+# --- Presupuestos de la 004 convertidos en rubros (RF-33, RF-35) ---
+
+
+def rows(engine: Engine, query: str) -> list:
+    with engine.connect() as connection:
+        return connection.execute(text(query)).all()
+
+
+def test_each_budget_with_an_amount_becomes_an_item_of_its_month(
+    file_engine: Engine,
+) -> None:
+    # Criterio 8: 400.000 para Comida desde 2026-09, y quitado desde 2026-12.
+    execute(
+        file_engine,
+        old_schemas.SCHEMA_007 + old_schemas.BASE_ROWS + old_schemas.BUDGET_ROWS,
+    )
+    columns = preserved_columns(file_engine)
+    before = snapshot(file_engine, columns)
+
+    run_migrations(file_engine)
+
+    items = rows(
+        file_engine,
+        "SELECT space_id, period_start, name, name_key, category_id, amount,"
+        " created_at FROM budget_items",
+    )
+    assert items == [
+        (1, "2026-09-01", "Comida", "comida", 1, 400000, "2026-09-01 10:00:00")
+    ]
+    # La fila que quitaba el presupuesto no crea nada.
+    assert rows(file_engine, "SELECT budget_item_id FROM expenses") == [(None,)]
+    assert "budgets" not in tables(file_engine)
+    assert snapshot(file_engine, columns) == before
+    assert schema_diff(file_engine) == []
+
+
+def test_budgets_of_several_spaces_and_categories_are_all_converted(
+    file_engine: Engine,
+) -> None:
+    execute(
+        file_engine,
+        old_schemas.SCHEMA_007
+        + old_schemas.BASE_ROWS
+        + [
+            "INSERT INTO spaces (id, name, created_at)"
+            " VALUES (2, 'Casa', '2026-09-01 10:00:00')",
+            "INSERT INTO categories (id, space_id, name, name_key, created_at)"
+            " VALUES (2, 1, 'Acción', 'accion', '2026-09-01 10:00:00')",
+            "INSERT INTO categories (id, space_id, name, name_key, created_at)"
+            " VALUES (3, 2, 'Comida', 'comida', '2026-09-01 10:00:00')",
+            "INSERT INTO budgets (space_id, category_id, starts_on, amount,"
+            " updated_at) VALUES (1, 1, '2026-10-01', 500000, '2026-10-01 10:00:00')",
+            "INSERT INTO budgets (space_id, category_id, starts_on, amount,"
+            " updated_at) VALUES (1, 2, '2026-10-01', 90000, '2026-10-01 10:00:00')",
+            "INSERT INTO budgets (space_id, category_id, starts_on, amount,"
+            " updated_at) VALUES (2, 3, '2026-10-01', 700000, '2026-10-01 10:00:00')",
+        ],
+    )
+
+    run_migrations(file_engine)
+
+    assert rows(
+        file_engine,
+        "SELECT space_id, period_start, name, category_id, amount FROM budget_items"
+        " ORDER BY space_id, category_id",
+    ) == [
+        (1, "2026-10-01", "Comida", 1, 500000),
+        (1, "2026-10-01", "Acción", 2, 90000),
+        (2, "2026-10-01", "Comida", 3, 700000),
+    ]
+
+
+def test_a_database_without_budgets_converts_nothing(file_engine: Engine) -> None:
+    # Una base de la 003: la 0001 crea `budgets` vacía y la 0003 la quita.
+    execute(file_engine, old_schemas.SCHEMA_003 + old_schemas.BASE_ROWS)
+
+    run_migrations(file_engine)
+
+    assert rows(file_engine, "SELECT COUNT(*) FROM budget_items") == [(0,)]
+    assert "budgets" not in tables(file_engine)

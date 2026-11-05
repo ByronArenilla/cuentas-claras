@@ -206,7 +206,7 @@ rutas de gastos con las reglas de "Editar un gasto" del plan.
 - Hecho cuando: los tests pasan.
 - RF: RF-13 a RF-16, RF-43.
 
-## [ ] T10 — Retirar el presupuesto de la 004 (contraer)
+## [x] T10 — Retirar el presupuesto de la 004 (contraer)
 Migración `0003_budgets_to_budget_items`; salen `Budget`, `BudgetIn`,
 `BudgetOut` y sus tests de modelo.
 
