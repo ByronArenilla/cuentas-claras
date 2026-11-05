@@ -75,7 +75,7 @@ rechazando una eliminada con su propio mensaje.
 - Hecho cuando: los tests pasan.
 - RF: RF-39 a RF-41, RF-43, RF-44; decisiones 22 y 23.
 
-## [ ] T4 — Esquemas y `previous_period`
+## [x] T4 — Esquemas y `previous_period`
 `schemas.py`: `BudgetItemIn`, `BudgetItemPatch`, `BudgetItemOut`,
 `IncomeIn`, `IncomePatch`, `IncomeOut` y `PlanCopyIn`. `dates.py`:
 `previous_period`.

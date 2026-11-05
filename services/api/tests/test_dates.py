@@ -46,3 +46,17 @@ def test_today_is_computed_in_configured_time_zone(
 
 def test_now_is_in_utc() -> None:
     assert dates.now().utcoffset() == UTC.utcoffset(None)
+
+
+@pytest.mark.parametrize(
+    ("period", "previous"),
+    [("2026-11", "2026-10"), ("2026-01", "2025-12"), ("0001-02", "0001-01")],
+)
+def test_previous_period(period: str, previous: str) -> None:
+    # Spec 008: la copia del plan toma el mes inmediatamente anterior.
+    assert dates.previous_period(period) == previous
+
+
+def test_previous_period_rejects_invalid_period() -> None:
+    with pytest.raises(ValueError):
+        dates.previous_period("2026-13")

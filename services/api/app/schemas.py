@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     StrictInt,
     field_validator,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -371,3 +372,127 @@ class SummaryOut(BaseModel):
     period: str
     categories: list[CategorySummaryOut]
     total: TotalSummaryOut
+
+
+# --- Plan del mes: rubros, ingresos y copia (spec 008) ---
+
+MAX_PLAN_NAME_LENGTH = 50
+
+
+def plan_name(kind: str) -> AfterValidator:
+    """Validador del nombre de un rubro o un ingreso (RF-3, RF-10): sin
+    espacios alrededor y de 1 a 50 caracteres, como las categorías."""
+
+    def check(value: str) -> str:
+        name = value.strip()
+        if not 1 <= len(name) <= MAX_PLAN_NAME_LENGTH:
+            raise PydanticCustomError(
+                "invalid_plan_name",
+                "El nombre del {kind} debe tener entre 1 y {max_length} caracteres.",
+                {"kind": kind, "max_length": MAX_PLAN_NAME_LENGTH},
+            )
+        return name
+
+    return AfterValidator(check)
+
+
+ItemName = Annotated[str, plan_name("rubro")]
+IncomeName = Annotated[str, plan_name("ingreso")]
+
+
+def current_period() -> str:
+    # Al validar, no al definir la clase: "hoy" cambia (RF-2).
+    return dates.period_of(dates.today())
+
+
+def reject_period_change(data: object) -> object:
+    """El mes de un rubro o de un ingreso no se cambia (decisión 12). Se
+    rechaza con un mensaje en lugar de ignorarlo en silencio."""
+    if isinstance(data, dict) and "period" in data:
+        raise PydanticCustomError(
+            "period_not_editable",
+            "El mes no se cambia: bórralo y créalo de nuevo en el otro mes.",
+        )
+    return data
+
+
+def reject_nulls(value: object) -> object:
+    # Sin esto, `None` pasaría por el `| None` del tipo y el rubro o el
+    # ingreso se quedaría sin nombre, categoría o monto.
+    if value is None:
+        raise PydanticCustomError(
+            "null_not_allowed",
+            "Este campo no puede quedar vacío; si no quieres cambiarlo, no lo envíes.",
+        )
+    return value
+
+
+def month_of(value: object) -> object:
+    # Las filas guardan el día 1 del mes (`period_start`); se responde con el
+    # mes `AAAA-MM`, igual que en la petición.
+    return dates.period_of(value) if isinstance(value, date) else value
+
+
+# Lee `period_start` de la fila y lo devuelve como `period`.
+PeriodOut = Annotated[
+    str, BeforeValidator(month_of), Field(validation_alias="period_start")
+]
+
+
+class BudgetItemIn(BaseModel):
+    # Sin `space_id`: sale de la ruta.
+    period: Period = Field(default_factory=current_period)
+    name: ItemName
+    # Que exista y esté activa en el espacio lo comprueba la ruta (RF-5).
+    category_id: StrictInt
+    amount: Amount
+
+
+class BudgetItemPatch(BaseModel):
+    # La ruta aplica solo `model_fields_set` (RF-6).
+    name: ItemName | None = None
+    category_id: StrictInt | None = None
+    amount: Amount | None = None
+
+    _no_period = model_validator(mode="before")(reject_period_change)
+    _no_nulls = field_validator("name", "category_id", "amount", mode="before")(
+        reject_nulls
+    )
+
+
+class BudgetItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    period: PeriodOut
+    name: str
+    category_id: int
+    amount: int
+
+
+class IncomeIn(BaseModel):
+    period: Period = Field(default_factory=current_period)
+    name: IncomeName
+    amount: Amount
+
+
+class IncomePatch(BaseModel):
+    name: IncomeName | None = None
+    amount: Amount | None = None
+
+    _no_period = model_validator(mode="before")(reject_period_change)
+    _no_nulls = field_validator("name", "amount", mode="before")(reject_nulls)
+
+
+class IncomeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    period: PeriodOut
+    name: str
+    amount: int
+
+
+class PlanCopyIn(BaseModel):
+    # El mes destino; el origen es el inmediatamente anterior (decisión 9).
+    period: Period = Field(default_factory=current_period)
