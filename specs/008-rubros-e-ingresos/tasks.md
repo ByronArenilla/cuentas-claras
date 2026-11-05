@@ -223,7 +223,7 @@ Migración `0003_budgets_to_budget_items`; salen `Budget`, `BudgetIn`,
   `app/` solo encuentra la migración `0003` y la `0001`.
 - RF: RF-33, RF-35, RF-36.
 
-## [ ] T11 — Aislamiento y ciclo de vida
+## [x] T11 — Aislamiento y ciclo de vida
 `test_isolation.py`: amplía los criterios con rubros, ingresos, la copia,
 el resumen y la eliminación de categorías. Si T3 a T9 están bien hechas, no
 debería hacer falta código nuevo; si algún test falla, se corrige aquí.
