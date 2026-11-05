@@ -26,6 +26,8 @@ está validada. Marca con [x] las specs terminadas.
     da a cada gasto un rubro o la marca de "no planeado".
   - Se llamaba "partidas"; se cambió a "rubro" en la clarificación
     (2026-11-05).
+  - Incluye eliminar categorías: se archivan, los rubros y gastos que ya
+    las tenían las conservan, y crearlas de nuevo las restaura.
   - Cambia tablas que ya están en `main`, así que **entran las migraciones
     con Alembic** con un ADR que reemplaza al 0004 y otro que reemplaza al
     0008. La primera migración decide qué pasa con las tablas de Telegram

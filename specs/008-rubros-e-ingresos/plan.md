@@ -12,6 +12,8 @@ entra Alembic. El plan tiene dos mitades:
    base creada con `create_all`, y la API aplicándolas al arrancar.
 2. **Plan del mes**: rubros, ingresos, copia del plan, gastos con rubro y
    el resumen nuevo, y el retiro del presupuesto de la 004.
+3. **Categorías eliminadas**: eliminar una categoría la archiva, y crearla
+   de nuevo la restaura.
 
 Los cambios de esquema siguen el patrón **expandir y contraer**
 ([*parallel change*](https://martinfowler.com/bliki/ParallelChange.html)):
@@ -39,7 +41,11 @@ viejos y borra lo que sobra. Así cada tarea deja la API funcionando.
 | Cambiar la categoría de un rubro | Un `UPDATE expenses SET category_id = … WHERE budget_item_id = …` en la misma transacción | RF-7. |
 | Borrar un rubro | `UPDATE expenses SET budget_item_id = NULL …` y luego `DELETE` del rubro, en la misma transacción | RF-8: los gastos ya tienen la categoría del rubro, así que solo se suelta el vínculo. `budget_item_id` no tiene `ON DELETE`, por la misma razón que `category_id` (plan 003). |
 | Copiar el plan | `app/plan.py`: comprueba destino vacío y origen con plan, inserta todo y hace un solo `commit`; un `IntegrityError` se responde como destino con plan | RF-13 a RF-16. Todo o nada: o se copia el plan entero o no se crea ninguna fila. |
-| Respuesta de la copia | `201` con el resumen del periodo destino | Es lo que la pantalla de planear (011) muestra a continuación. Se ahorra una segunda petición. |
+| Respuesta de la copia | `201` con `{"summary": …, "skipped": […]}`: el resumen del periodo destino y los rubros omitidos por categoría eliminada | Es lo que la pantalla de planear (011) muestra a continuación, y RF-13 pide decir qué se omitió. Se ahorra una segunda petición. |
+| Eliminar una categoría | Columna nueva `categories.deleted_at` (nula), añadida en la `0002`; `DELETE` la rellena | Decisión 14: archivar, no borrar. Rubros y gastos siguen apuntando a la misma fila. Se descartaron borrar la fila (dejaría rubros y gastos sin categoría, principio 8) y una tabla aparte de eliminadas (mover la fila cambiaría su `id` y rompería las referencias). |
+| Categorías que se pueden elegir | `check_category` y `GET /categories` filtran `deleted_at IS NULL`. Una eliminada del propio espacio responde `422` con su propio mensaje | RF-39 y RF-41. Una categoría de otro espacio sigue respondiendo como inexistente (RF-5 de la 003). Una eliminada es del propio espacio, así que no hay nada que ocultar y el mensaje puede decir cómo restaurarla. |
+| Restaurar | En `POST /categories`, si el `name_key` es de una eliminada, se pone `deleted_at = NULL` y se responde `200` con la categoría, en lugar de `201` | RF-43 y decisión 21. El índice único `(space_id, name_key)` de la 002 ya incluye las eliminadas, así que nunca puede haber dos con el mismo nombre. El `200` dice "no se creó nada nuevo" sin cambiar la forma de la respuesta. |
+| Autocompletar el rubro al registrar | Ninguna ruta nueva | Decisión 13: la web (010) filtra los rubros que ya trae el resumen del mes. Un mes tiene pocas decenas de rubros. |
 | Rutas para leer el plan | Ninguna aparte: el resumen trae rubros e ingresos con sus identificadores | Como en el plan 004, lo que la web necesita ya va en el resumen. Si la 011 necesita otra cosa, la añade. |
 | Retiro del presupuesto | La `0003` convierte `budgets` en rubros con `INSERT … SELECT` y borra la tabla. Salen `Budget`, `BudgetIn`, `BudgetOut` y `app/routers/budgets.py` | Decisión 4 y RF-27. La conversión es SQL dentro de la migración: no puede importar los modelos, que ya no tienen `Budget`. |
 
@@ -57,7 +63,8 @@ viejos y borra lo que sobra. Así cada tarea deja la API funcionando.
         db.py                         − create_all; + run_migrations           [RF-31, RF-37]
         main.py                       lifespan con run_migrations; routers nuevos
         dates.py                      + previous_period                       [RF-13]
-        models.py                     + BudgetItem, Income, Expense.budget_item_id; − Budget
+        models.py                     + BudgetItem, Income, Expense.budget_item_id,
+                                      Category.deleted_at; − Budget
         schemas.py                    + rubros, ingresos, copia, resumen nuevo;
                                       ExpenseIn/Patch/Out con rubro; − BudgetIn/Out
         summary.py                    reescrito: resumen del plan             [RF-23 a RF-26]
@@ -67,12 +74,13 @@ viejos y borra lo que sobra. Así cada tarea deja la API funcionando.
           incomes.py                  nuevo: crear, editar y borrar ingresos  [RF-10 a RF-12]
           plan.py                     nuevo: resumen y copia del plan
           expenses.py                 rubro al registrar y editar             [RF-17 a RF-22]
+          categories.py               + DELETE; POST restaura una eliminada   [RF-39 a RF-44]
           budgets.py                  eliminado                               [RF-27]
         migrations/
           env.py, script.py.mako
           versions/
             0001_baseline.py          esquema de la 007, idempotente; − Telegram  [RF-32, RF-34]
-            0002_budget_items_and_incomes.py   expandir                      [RF-31]
+            0002_budget_items_and_incomes.py   expandir                      [RF-31, RF-39]
             0003_budgets_to_budget_items.py    contraer y convertir          [RF-33, RF-35]
       tests/
         conftest.py                   Base.metadata.create_all
@@ -83,6 +91,7 @@ viejos y borra lo que sobra. Así cada tarea deja la API funcionando.
         test_plan.py                  nuevo: copia y resumen por HTTP
         test_summary.py               reescrito: cálculo sin HTTP
         test_expenses.py              + gastos con rubro
+        test_categories.py            + eliminar y restaurar
         test_budgets.py               eliminado (sus casos pasan a los de arriba)
         test_isolation.py             + rubros, ingresos, copia y resumen
         test_retired_bot.py           el criterio 4 de la 007 pasa a test_migrations
@@ -121,6 +130,10 @@ Borrar un espacio: `ON DELETE CASCADE` quita gastos, rubros e ingresos en
 la misma sentencia, y las claves foráneas sin `ON DELETE` (`NO ACTION`) se
 comprueban al final, así que no chocan (mismo razonamiento del plan 003).
 
+**`categories`** — se añade `deleted_at`: `UTCDateTime` nulo. Nulo es
+activa; con fecha, eliminada desde ese momento. Ninguna fila se borra.
+[RF-39, RF-40]
+
 **`budgets`**: sale en la `0003`, después de convertir sus filas.
 
 ## Migraciones
@@ -139,7 +152,7 @@ Arma un `alembic.config.Config` en código con `script_location` apuntando a
 | Migración | Qué hace | RF |
 |---|---|---|
 | `0001_baseline` | Para cada tabla del esquema al cerrar la 007 (`users`, `spaces`, `memberships`, `invitations`, `sessions`, `categories`, `expenses`, `budgets`), `op.create_table` solo si `inspect(conn).has_table(...)` dice que falta. Luego `DROP TABLE IF EXISTS` de `telegram_chats` y `telegram_link_codes`. Las tablas se escriben a mano, no desde los modelos, que seguirán cambiando. | RF-32, RF-34 |
-| `0002_budget_items_and_incomes` | Crea `budget_items` e `incomes`. Añade `expenses.budget_item_id`, su clave foránea y su índice con `batch_alter_table`. Solo añade: ningún dato cambia. | RF-31 |
+| `0002_budget_items_and_incomes` | Crea `budget_items` e `incomes`. Añade `expenses.budget_item_id`, su clave foránea y su índice, y `categories.deleted_at`, con `batch_alter_table`. Solo añade: ningún dato cambia y toda categoría queda activa. | RF-31, RF-39 |
 | `0003_budgets_to_budget_items` | `INSERT INTO budget_items (...) SELECT b.space_id, b.starts_on, c.name, c.name_key, b.category_id, b.amount, b.updated_at FROM budgets b JOIN categories c ON c.id = b.category_id WHERE b.amount IS NOT NULL`, y después `op.drop_table("budgets")`. Los gastos no se tocan: su `budget_item_id` ya es nulo. | RF-33, RF-35 |
 
 - **Por qué no chocan los nombres al convertir**: hay una sola fila de
@@ -177,9 +190,9 @@ Salidas:
            "planned": 800000, "spent": 412000, "remaining": 388000}
         ],
         "categories": [
-          {"category_id": 1, "name": "Hogar", "planned": 1500000, "spent": 1500000},
-          {"category_id": 2, "name": "Comida", "planned": 800000, "spent": 450000},
-          ...  todas las categorías del espacio, también las que están en 0
+          {"category_id": 1, "name": "Hogar", "planned": 1500000, "spent": 1500000, "deleted": false},
+          {"category_id": 2, "name": "Comida", "planned": 800000, "spent": 450000, "deleted": false},
+          ...  las activas, también las que están en 0, y las eliminadas con datos en el mes
         ],
         "total": {
           "income": 5000000, "planned": 2300000,
@@ -205,7 +218,9 @@ recorre las rutas con `{space_id}` las vigila sin cambios. [RF-28]
 | `POST /spaces/{space_id}/incomes` | Crea un ingreso | `201` `IncomeOut`; `409`; `422` | RF-10 |
 | `PATCH /spaces/{space_id}/incomes/{income_id}` | Edita nombre o monto | `200`; `404` "Ingreso no encontrado."; `409`; `422` | RF-11, RF-12 |
 | `DELETE /spaces/{space_id}/incomes/{income_id}` | Borra el ingreso | `204`; `404` | RF-11, RF-12 |
-| `POST /spaces/{space_id}/plan/copy` | Copia el plan del mes anterior al `period` del cuerpo | `201` `SummaryOut`; `409` destino con plan u origen vacío | RF-13 a RF-16 |
+| `POST /spaces/{space_id}/plan/copy` | Copia el plan del mes anterior al `period` del cuerpo, sin los rubros de categorías eliminadas | `201` `PlanCopyOut`; `409` destino con plan u origen sin nada que copiar | RF-13 a RF-16 |
+| `DELETE /spaces/{space_id}/categories/{category_id}` | Elimina (archiva) la categoría | `204`; `404` "Categoría no encontrada." si no existe, es de otro espacio o ya está eliminada | RF-39, RF-40, RF-44 |
+| `POST /spaces/{space_id}/categories` | Como en la 002; si el nombre es de una eliminada, la restaura | `201` creada; `200` restaurada; `409` nombre de una activa | RF-43 |
 | `GET /spaces/{space_id}/summary?period=` | Resumen nuevo | `200` `SummaryOut`; `422` periodo mal escrito | RF-23 a RF-26 |
 
 Mensajes:
@@ -214,13 +229,16 @@ Mensajes:
   ingreso «Salario» en 2026-11." Se nombra el que ya existe, con su
   escritura, como en las categorías.
 - Destino con plan: "2026-12 ya tiene un plan; no se copió nada."
-- Origen vacío: "2026-11 no tiene un plan para copiar."
+- Origen sin nada que copiar: "2026-11 no tiene un plan para copiar."
 - Rubro del gasto que no está en el espacio: `422` "El rubro no existe en
   este espacio.", como la categoría.
 - Rubro de otro mes: `422` "El rubro «Mercado» es de 2026-10 y el gasto es
   de 2026-11. Elige un rubro de 2026-11 o regístralo como no planeado."
 - Cambiar la categoría de un gasto planeado: `422` "El gasto está en el
   rubro «Mercado» y usa su categoría. Para cambiarla, quítale el rubro."
+- Categoría eliminada en un rubro o un gasto: `422` "La categoría «Mascotas»
+  fue eliminada. Para usarla de nuevo, créala otra vez con el mismo
+  nombre."
 
 **Editar un gasto** (`PATCH`), con los campos enviados:
 
@@ -246,9 +264,13 @@ Funciones sin HTTP (principio 10), todas filtradas por `space_id`
   suma (principio 6).
 - `build_summary(db, space_id, period) -> SummaryOut`: lee ingresos y rubros
   del mes por `id`, las categorías del espacio por `id`, y arma filas y
-  totales. `spent_unplanned = spent - spent_planned`.
-- `plan.copy_previous_plan(db, space_id, period) -> None`: lanza
-  `PlanNotEmpty` o `NothingToCopy`, que la ruta convierte en `409`.
+  totales. De las categorías eliminadas solo incluye las que tienen rubros
+  o gastos en el mes (decisión 18). `spent_unplanned = spent -
+  spent_planned`.
+- `plan.copy_previous_plan(db, space_id, period) -> list[SkippedItem]`:
+  copia los ingresos y los rubros cuya categoría está activa, y devuelve
+  los omitidos. Lanza `PlanNotEmpty` o `NothingToCopy` (también si todo se
+  omitió y no hay ingresos), que la ruta convierte en `409`.
 - `dates.previous_period("2026-01") == "2025-12"`.
 
 ## Tests
@@ -277,6 +299,9 @@ Funciones sin HTTP (principio 10), todas filtradas por `space_id`
   bordes del periodo de la 004.
 - `test_plan.py`: criterios 1, 3 y 6 por HTTP, y el `404` de la ruta de la
   004 (criterio 11).
+- `test_categories.py`: eliminar, el listado sin eliminadas, restaurar con
+  el nombre original, y los `404` (criterios 13 y 14). Los tests de la 002
+  siguen en verde.
 - `test_isolation.py`: criterio 12.
 - `test_retired_bot.py`: el criterio 4 de la 007 (las tablas de Telegram
   siguen intactas) deja de ser cierto a propósito: lo reemplaza el test de
@@ -312,6 +337,10 @@ anterior. El README lo explica.
 - **Borrar un rubro mientras otro miembro registra un gasto en él**: el
   `INSERT` del gasto choca con la clave foránea. La ruta lo responde como
   rubro inexistente (`422`), no como `500`.
+- **Eliminar una categoría mientras otro miembro crea un rubro con ella**:
+  el rubro puede quedar con una categoría recién eliminada. No rompe nada:
+  es el mismo caso que un rubro creado justo antes de eliminarla
+  (decisión 17).
 - **Varias réplicas migrando a la vez** (fase 8): queda anotado en la spec.
 - **El glosario de `AGENTS.md`** queda desactualizado hasta que se apruebe
   cambiarlo (spec, "Requisitos para otras specs y documentos").
@@ -324,5 +353,6 @@ anterior. El README lo explica.
 - [`compare_metadata`](https://alembic.sqlalchemy.org/en/latest/api/autogenerate.html#alembic.autogenerate.compare_metadata): comparar el esquema real con el de los modelos.
 - [Expandir y contraer (*parallel change*)](https://martinfowler.com/bliki/ParallelChange.html): cambiar un esquema en pasos que nunca rompen la aplicación.
 - [`INSERT … SELECT`](https://www.sqlite.org/lang_insert.html): copiar filas de una tabla a otra en una sola sentencia.
+- Borrado lógico (*soft delete*): marcar una fila como eliminada en lugar de borrarla; aquí con una columna `deleted_at` y un filtro en cada consulta.
 - [`UPDATE` con SQLAlchemy](https://docs.sqlalchemy.org/en/20/tutorial/data_update.html): cambiar muchas filas sin cargarlas.
 - [DDL transaccional en SQLite con SQLAlchemy](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#serializable-isolation-savepoints-transactional-ddl): por qué una migración en SQLite puede quedar a medias.

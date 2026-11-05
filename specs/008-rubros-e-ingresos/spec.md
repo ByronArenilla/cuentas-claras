@@ -3,7 +3,7 @@
 - Fase: 1 — Aplicación y SDD
 - Estado: propuesta (2026-11-05)
 - Base: spec 001 (aislamiento entre espacios), spec 002 (categorías y
-  comparación de nombres, ADR 0006), spec 003 (gastos y regla de periodo),
+  comparación de nombres, ADR 0006; esta spec añade eliminarlas), spec 003 (gastos y regla de periodo),
   spec 004 (presupuesto y resumen, ADR 0008), spec 007 (tablas de Telegram),
   ADR 0004, ADR 0010
 
@@ -35,6 +35,8 @@ pedía el ADR 0004.
 - Ingresos: crear, editar y borrar los ingresos de un mes.
 - Copiar el plan (rubros e ingresos) del mes anterior a un mes vacío.
 - Gastos ligados a un rubro, o "no planeados" con su categoría.
+- Eliminar categorías sin perder su historia, y restaurarlas al crearlas
+  de nuevo.
 - Un resumen nuevo del mes: ingresos, rubros, categorías y totales.
 - Retirar el presupuesto por categoría de la 004 sin perder los montos
   guardados.
@@ -52,7 +54,9 @@ pedía el ADR 0004.
 - Listar los gastos de un rubro: el listado por periodo ya trae el rubro de
   cada gasto y el cliente puede filtrarlo.
 - Historial de cambios del plan.
-- Borrar categorías (sigue pendiente desde la 002).
+- Ver la lista de categorías eliminadas o restaurarlas desde ella: se
+  restauran creándolas de nuevo con el mismo nombre (decisión 16).
+- Renombrar categorías.
 - Deshacer las migraciones (`downgrade`): la vuelta atrás es restaurar la
   copia de la base de datos (ver RF-38).
 
@@ -68,6 +72,9 @@ pedía el ADR 0004.
 - **Gasto planeado**: gasto ligado a un rubro de su mismo mes. Su categoría
   es la del rubro.
 - **Gasto no planeado**: gasto sin rubro. Tiene su propia categoría.
+- **Categoría eliminada**: categoría que ya no se ofrece para rubros ni
+  gastos nuevos. Los rubros y gastos que ya la tenían la conservan, así que
+  sigue apareciendo en los meses donde se usó.
 - **Planeado**: suma de los montos de los rubros.
 - **Sin asignar**: ingresos menos planeado. Negativo si se planeó más de lo
   que entra.
@@ -104,12 +111,13 @@ pedía el ADR 0004.
    conservar la tabla sin uso (un esquema con tablas huérfanas, lo que la
    007 descartó para Telegram).
 
-## Decisiones tomadas al redactar la spec (a revisar)
+## Decisiones tomadas al redactar la spec (6 a 12, a revisar)
 
 5. **Un gasto planeado está siempre en la categoría de su rubro.** Al
    registrarlo se indica el rubro **o** la categoría, nunca los dos. Si el
    rubro cambia de categoría, sus gastos cambian con él. Así el resumen por
-   categoría cuadra siempre con el de rubros.
+   categoría cuadra siempre con el de rubros. Confirmada en la segunda
+   ronda (decisión 13).
 6. **Un gasto solo se liga a un rubro de su mismo mes.** El rubro "Mercado"
    de octubre no puede llevar un gasto del 3 de noviembre. Cambiar la fecha
    de un gasto planeado a otro mes se rechaza: hay que elegir un rubro del
@@ -136,6 +144,46 @@ pedía el ADR 0004.
     mes se borra y se crea en el otro: así un rubro nunca deja gastos de
     otro mes colgando.
 
+## Segunda ronda de clarificación (2026-11-05)
+
+13. **Un gasto planeado se registra escribiendo el rubro**, y la categoría
+    sale del rubro: no se vuelve a escribir. Mientras se escribe, la web
+    sugiere los rubros del mes con lo presupuestado y lo que queda (010).
+    Un gasto no planeado sigue llevando su categoría.
+14. **Eliminar una categoría la archiva, no la borra.** Deja de salir como
+    opción para rubros, gastos no planeados y cambios de categoría. Los
+    rubros y gastos que ya la tenían, de cualquier mes, la conservan y
+    siguen contando en el resumen. Se permite aunque tenga rubros en el mes
+    actual o en meses futuros. Se descartó bloquearla mientras tenga rubros
+    actuales o futuros: obliga a moverlos antes, y conservarlos no rompe
+    nada. Borrarla de verdad dejaría rubros y gastos sin categoría
+    (principio 8).
+15. **Copiar el plan omite los rubros de categorías eliminadas** y dice
+    cuáles omitió. Eliminar la categoría significa que ya no se planea.
+16. **Crear una categoría con el nombre de una eliminada la restaura**, con
+    su historia: los meses pasados y los nuevos quedan juntos en la misma
+    categoría para las estadísticas. Se descartaron una categoría nueva
+    con el mismo nombre (dos "Mascotas" en las estadísticas) y rechazar el
+    nombre.
+
+## Decisiones tomadas al redactar la segunda ronda (a revisar)
+
+17. **Un rubro cuya categoría se eliminó sigue funcionando en su mes**: se
+    le registran gastos y se le cambian el nombre y el monto. Eliminar la
+    categoría solo quita la opción de elegirla.
+18. **El resumen de un mes muestra las categorías activas y, además, las
+    eliminadas que tengan rubros o gastos en ese mes**, marcadas como
+    eliminadas. Así los totales por categoría siempre cuadran.
+19. **También se pueden eliminar las categorías predefinidas.** Un espacio
+    puede quedarse sin categorías activas: entonces no se pueden crear
+    rubros ni gastos no planeados hasta crear o restaurar una.
+20. **Eliminar no pide confirmación**, porque no borra ningún dato y se
+    deshace creando de nuevo la categoría (decisión 16). La web (011)
+    debería decir que sus rubros dejarán de copiarse.
+21. **Restaurar conserva el nombre original.** Si se eliminó "Mascotas" y
+    alguien crea "mascotas", vuelve "Mascotas", como se ve en los meses
+    pasados.
+
 ## Requisitos funcionales
 
 ### Rubros
@@ -159,7 +207,7 @@ pedía el ADR 0004.
 - **RF-5** SI la categoría no existe en el espacio, incluso si pertenece a
   otro espacio del que quien llama también es miembro, ENTONCES el sistema
   DEBE rechazar el rubro sin guardar nada y sin distinguir un caso del
-  otro.
+  otro. Una categoría eliminada se rechaza como dice RF-41.
 - **RF-6** CUANDO un miembro edita un rubro, el sistema DEBE cambiar solo el
   nombre, la categoría o el monto que se envían, con las reglas de RF-3 a
   RF-5. El periodo de un rubro NO DEBE cambiar (decisión 12).
@@ -193,16 +241,18 @@ pedía el ADR 0004.
 
 - **RF-13** CUANDO un miembro copia el plan hacia un periodo, el sistema
   DEBE crear en ese periodo un rubro igual (nombre, categoría y monto) por
-  cada rubro del periodo inmediatamente anterior, y un ingreso igual
-  (nombre y monto) por cada ingreso, y devolver el resumen del periodo
-  destino (decisiones 2 y 9). Sin periodo, el destino es el periodo actual.
+  cada rubro del periodo inmediatamente anterior cuya categoría no esté
+  eliminada, y un ingreso igual (nombre y monto) por cada ingreso, y
+  devolver el resumen del periodo destino junto con los rubros que omitió
+  (decisiones 2, 9 y 15). Sin periodo, el destino es el periodo actual.
 - **RF-14** SI el periodo destino ya tiene algún rubro o ingreso, ENTONCES
   el sistema DEBE rechazar la copia sin crear nada, aunque lleguen dos
   copias a la vez. El sistema NUNCA DEBE mezclar ni reemplazar un plan que
   ya existe.
-- **RF-15** SI el periodo anterior no tiene rubros ni ingresos, ENTONCES el
-  sistema DEBE rechazar la copia sin crear nada e indicar qué periodo está
-  vacío.
+- **RF-15** SI el periodo anterior no tiene rubros ni ingresos, o solo
+  tiene rubros de categorías eliminadas, ENTONCES el sistema DEBE rechazar
+  la copia sin crear nada e indicar que ese periodo no tiene nada que
+  copiar.
 - **RF-16** Copiar el plan NUNCA DEBE cambiar el plan del periodo de origen
   ni ningún gasto. Los gastos del mes de origen siguen ligados a sus rubros
   de origen.
@@ -242,9 +292,10 @@ pedía el ADR 0004.
   - cada rubro del periodo, en orden de creación, con su nombre, su
     categoría, lo planeado, lo gastado (la suma de sus gastos) y lo que
     queda (planeado menos gastado, negativo si se excedió);
-  - cada categoría del espacio, en el orden de la 002, con lo planeado (la
-    suma de sus rubros, `0` si no tiene) y lo gastado (todos sus gastos del
-    periodo, planeados o no);
+  - cada categoría activa del espacio, y cada categoría eliminada con
+    rubros o gastos en el periodo, en el orden de la 002, con lo planeado
+    (la suma de sus rubros, `0` si no tiene), lo gastado (todos sus gastos
+    del periodo, planeados o no) y si está eliminada (decisión 18);
   - los totales: ingresos, planeado, gastado en rubros, gastado no
     planeado, gastado total, sin asignar y balance.
 - **RF-24** El sistema DEBE calcular lo gastado con la regla de periodo de
@@ -252,8 +303,8 @@ pedía el ADR 0004.
   en la unidad mínima de la moneda (principio 6). Sin asignar y balance
   pueden ser negativos.
 - **RF-25** SI el periodo no tiene plan, ENTONCES el sistema DEBE devolver
-  el resumen con las listas de ingresos y rubros vacías, las categorías con
-  planeado `0`, y los totales calculados igual (decisión 10). Pedir el
+  el resumen con las listas de ingresos y rubros vacías, las categorías
+  activas con planeado `0`, y los totales calculados igual (decisión 10). Pedir el
   resumen NUNCA DEBE crear ni cambiar datos.
 - **RF-26** SI no se indica periodo en el resumen, ENTONCES el sistema DEBE
   usar el periodo actual. Un periodo mal escrito se rechaza como en RF-8 de
@@ -267,8 +318,8 @@ pedía el ADR 0004.
 
 ### Aislamiento y ciclo de vida
 
-- **RF-28** Toda operación sobre rubros, ingresos, la copia del plan y el
-  resumen DEBE indicar el espacio y pasar por la comprobación de membresía
+- **RF-28** Toda operación sobre rubros, ingresos, la copia del plan, el
+  resumen y la eliminación de categorías DEBE indicar el espacio y pasar por la comprobación de membresía
   de la 001. Si quien llama no es miembro, el sistema DEBE responder `404`
   sin cambiar nada; sin sesión válida, `401`.
 - **RF-29** Ningún rubro, ingreso, copia ni resumen de un espacio DEBE leer
@@ -308,6 +359,32 @@ pedía el ADR 0004.
   arrancar, y que antes de arrancar la API con esta spec por primera vez
   conviene copiar la base de datos local, porque las migraciones no se
   deshacen.
+
+### Categorías eliminadas
+
+- **RF-39** CUANDO un miembro elimina una categoría de su espacio, el
+  sistema DEBE dejar de devolverla en el listado de categorías, sin pedir
+  confirmación, aunque tenga rubros o gastos en cualquier mes (decisiones
+  14, 19 y 20).
+- **RF-40** Eliminar una categoría NUNCA DEBE borrar ni cambiar rubros ni
+  gastos. Los que la tenían, de cualquier mes, DEBEN conservarla y seguir
+  contando en el resumen (decisión 14, principio 8).
+- **RF-41** SI se intenta usar una categoría eliminada en un rubro nuevo, al
+  cambiar la categoría de un rubro, en un gasto no planeado nuevo o al
+  cambiar la categoría de un gasto, ENTONCES el sistema DEBE rechazarlo sin
+  guardar nada e indicar que la categoría fue eliminada y cómo
+  restaurarla.
+- **RF-42** Un rubro con categoría eliminada DEBE seguir aceptando gastos de
+  su mes y cambios de nombre y monto. Un gasto con categoría eliminada DEBE
+  poder editarse sin cambiarle la categoría (decisión 17).
+- **RF-43** CUANDO un miembro crea una categoría con un nombre equivalente,
+  según la comparación de la 002, al de una categoría eliminada del mismo
+  espacio, el sistema DEBE restaurar esa categoría con su identificador y
+  su nombre original, en lugar de crear otra, e indicar que se restauró
+  (decisiones 16 y 21). Si el nombre es el de una categoría activa, se
+  rechaza como hoy (RF-8 de la 002).
+- **RF-44** SI la categoría de la ruta no existe, es de otro espacio o ya
+  está eliminada, ENTONCES eliminarla DEBE responder `404` sin cambiar nada.
 
 ## Criterios de validación
 
@@ -356,27 +433,48 @@ La spec se da por cumplida cuando, además de los tests por requisito:
 11. Un test comprueba que `PUT /spaces/{id}/budgets/{category_id}` responde
     `404` (RF-27).
 12. Tests de aislamiento: dos usuarios en espacios distintos no pueden
-    crear, editar, borrar ni copiar rubros o ingresos del otro, todo
+    crear, editar, borrar ni copiar rubros o ingresos del otro, ni eliminar
+    sus categorías, todo
     responde `404` y nada de uno aparece en el resumen del otro; un rubro
     del espacio B no sirve para un gasto del espacio A aunque quien llama
     sea miembro de los dos; borrar un espacio borra sus rubros e ingresos y
     no los de otro, y salir de un espacio los conserva (RF-9, RF-12, RF-18,
     RF-28 a RF-30).
-13. `make test` y `make lint` pasan en verde.
+13. Un test crea "Mascotas" con un rubro en octubre y otro en noviembre, y
+    un gasto no planeado en octubre. Elimina "Mascotas" en noviembre y
+    comprueba que:
+    - ya no sale en el listado de categorías;
+    - el resumen de octubre no cambia, y en los de octubre y noviembre sale
+      marcada como eliminada;
+    - el rubro de noviembre sigue aceptando gastos;
+    - un rubro nuevo o un gasto no planeado con "Mascotas" se rechazan;
+    - copiar noviembre a diciembre omite su rubro y lo dice;
+    - crear "mascotas" la restaura con el mismo identificador y el nombre
+      "Mascotas", y desde entonces se copia y se usa de nuevo
+    (RF-13, RF-39 a RF-43).
+14. Un test comprueba que eliminar una categoría ya eliminada, de otro
+    espacio o inexistente responde `404`, y que se pueden eliminar las
+    predefinidas (RF-44, decisión 19).
+15. `make test` y `make lint` pasan en verde.
 
 ## Requisitos para otras specs y documentos
 
 - **009-tarjetas-y-cuotas:** una compra a 1 cuota cuenta en su rubro el mes
   de la compra; una a varias cuotas no se descuenta de su rubro (roadmap).
   Lo que esta spec llama "gasto planeado" es la base de esa regla.
-- **010-app-web:** el formulario de registro elige un rubro del mes de la
-  fecha o "no planeado" con su categoría (RF-17, RF-19).
+- **010-app-web:** en el formulario de registro se escribe el rubro y salen
+  como sugerencias los rubros del mes de la fecha, con lo presupuestado y
+  lo que queda; la categoría sale del rubro. Si no estaba planeado, se
+  elige "no planeado" y su categoría (RF-17, RF-19, decisión 13). Las
+  sugerencias salen de los rubros del resumen: no hace falta otra ruta.
 - **011-tablero-y-planear:** la pantalla de planear ofrece "Copiar del mes
-  anterior" cuando el mes está vacío, avisa cuántos gastos quedan sin rubro
-  al borrar uno (decisión 8) y muestra sin asignar y balance.
+  anterior" cuando el mes está vacío y muestra los rubros omitidos, avisa
+  cuántos gastos quedan sin rubro al borrar uno (decisión 8) y muestra sin
+  asignar y balance. Al eliminar una categoría, dice que sus rubros dejarán
+  de copiarse y cómo restaurarla (decisión 20).
 - **Fase 8 (Kubernetes):** con varias réplicas de la API, aplicar las
   migraciones al arrancar puede correrlas a la vez. Esa fase decide si pasan
   a un paso propio, por ejemplo un `Job` (decisión 11).
 - **AGENTS.md:** el glosario define "Presupuesto" como monto por categoría
-  y no tiene "rubro", "ingreso" ni "plan". Hay que actualizarlo al cerrar
+  y no tiene "rubro", "ingreso", "plan" ni "categoría eliminada". Hay que actualizarlo al cerrar
   la spec, con aprobación explícita (AGENTS.md no se modifica sin pedirlo).
