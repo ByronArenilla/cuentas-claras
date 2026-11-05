@@ -126,6 +126,14 @@ class CategoryOut(BaseModel):
     name: str
 
 
+class CategoryDeletedOut(BaseModel):
+    # Con el aviso de cómo volver a usarla, que la web muestra tal cual
+    # (spec 008, decisión 23).
+    id: int
+    name: str
+    message: str
+
+
 class RegisterOut(BaseModel):
     id: int
     email: str

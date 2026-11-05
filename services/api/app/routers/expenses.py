@@ -14,14 +14,12 @@ from sqlalchemy.orm import Session
 from app import dates
 from app.db import get_db
 from app.deps import current_user, member_space, requested_period
-from app.models import Category, Expense, Space, User
+from app.models import Expense, Space, User
+from app.routers.categories import usable_category
 from app.schemas import ExpenseIn, ExpenseOut, ExpensePatch
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
 
-CATEGORY_NOT_IN_SPACE = HTTPException(
-    status.HTTP_422_UNPROCESSABLE_CONTENT, "La categoría no existe en este espacio."
-)
 EXPENSE_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Gasto no encontrado.")
 UNCONFIRMED_DELETE = HTTPException(
     status.HTTP_400_BAD_REQUEST, "Para borrar el gasto, confirma con confirm=true."
@@ -47,23 +45,6 @@ def space_expense(
     return expense
 
 
-def check_category(db: Session, space_id: int, category_id: int) -> None:
-    """Exige que la categoría sea del espacio (RF-5).
-
-    Se busca por `id` y `space_id` a la vez, así que una categoría de otro
-    espacio y una inexistente reciben el mismo mensaje. La base de datos no lo
-    garantiza: haría falta una clave foránea compuesta que cambia la tabla
-    `categories` (plan 003).
-    """
-    found = db.scalar(
-        select(Category.id).where(
-            Category.id == category_id, Category.space_id == space_id
-        )
-    )
-    if found is None:
-        raise CATEGORY_NOT_IN_SPACE
-
-
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_expense(
     data: ExpenseIn,
@@ -73,7 +54,10 @@ def create_expense(
 ) -> ExpenseOut:
     """Registra un gasto en el espacio de la ruta, a nombre de quien llama
     (RF-1). El espacio y el autor nunca salen del cuerpo (RF-14)."""
-    check_category(db, space.id, data.category_id)
+    # La categoría debe ser del espacio (RF-5) y estar activa (RF-41 de la
+    # 008). La base de datos no lo garantiza: haría falta una clave foránea
+    # compuesta que cambia la tabla `categories` (plan 003).
+    usable_category(db, space.id, data.category_id)
 
     expense = Expense(**data.model_dump(), space_id=space.id, created_by=user.id)
     db.add(expense)
@@ -146,7 +130,7 @@ def update_expense(
     # Un `"description": null` sí está y la quita (decisión 8).
     changes = data.model_dump(exclude_unset=True)
     if "category_id" in changes:
-        check_category(db, expense.space_id, changes["category_id"])
+        usable_category(db, expense.space_id, changes["category_id"])
 
     for field, value in changes.items():
         setattr(expense, field, value)

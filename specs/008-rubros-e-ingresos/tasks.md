@@ -50,7 +50,7 @@
 - Hecho cuando: los tests pasan y ninguna ruta cambió de comportamiento.
 - RF: base de RF-3, RF-4, RF-10, RF-30, RF-36 y RF-39.
 
-## [ ] T3 — Eliminar y restaurar categorías
+## [x] T3 — Eliminar y restaurar categorías
 `DELETE /spaces/{space_id}/categories/{category_id}`; el listado sin
 eliminadas; `POST /categories` restaurando una eliminada; `check_category`
 rechazando una eliminada con su propio mensaje.

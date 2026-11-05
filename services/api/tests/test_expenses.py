@@ -928,3 +928,79 @@ def test_reading_one_expense_still_works_next_to_recent(
 
     assert response.status_code == 200
     assert response.json()["id"] == expense_id
+
+
+# --- Categorías eliminadas (spec 008, RF-41, RF-42) ---
+
+
+def deleted_category_setup(
+    client: TestClient, login: Login
+) -> tuple[dict[str, str], int, int, dict]:
+    """Ana con un gasto en "Mascotas", y "Mascotas" ya eliminada."""
+    ana = login("ana@example.com")
+    space_id = client.get("/spaces", headers=ana).json()[0]["id"]
+    mascotas = client.post(
+        f"/spaces/{space_id}/categories", json={"name": "Mascotas"}, headers=ana
+    ).json()["id"]
+    expense = client.post(
+        f"/spaces/{space_id}/expenses",
+        json={"amount": 20000, "payment_type": "debit", "category_id": mascotas},
+        headers=ana,
+    ).json()
+    client.delete(f"/spaces/{space_id}/categories/{mascotas}", headers=ana)
+    return ana, space_id, mascotas, expense
+
+
+def test_a_deleted_category_cannot_be_used_for_a_new_expense(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    ana, space_id, mascotas, _ = deleted_category_setup(client, login)
+
+    response = client.post(
+        f"/spaces/{space_id}/expenses",
+        json={"amount": 5000, "payment_type": "debit", "category_id": mascotas},
+        headers=ana,
+    )
+
+    assert response.status_code == 422
+    assert "«Mascotas» fue eliminada" in response.json()["detail"]
+    assert "créala otra vez con el mismo nombre" in response.json()["detail"]
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(Expense)) == 1
+
+
+def test_an_expense_cannot_be_moved_to_a_deleted_category(
+    client: TestClient, login: Login
+) -> None:
+    ana, space_id, mascotas, _ = deleted_category_setup(client, login)
+    comida = client.post(
+        f"/spaces/{space_id}/expenses",
+        json={"amount": 5000, "payment_type": "debit", "category_id": 2},
+        headers=ana,
+    ).json()
+
+    response = client.patch(
+        f"/spaces/{space_id}/expenses/{comida['id']}",
+        json={"category_id": mascotas},
+        headers=ana,
+    )
+
+    assert response.status_code == 422
+    assert "fue eliminada" in response.json()["detail"]
+
+
+def test_an_expense_in_a_deleted_category_can_still_be_edited(
+    client: TestClient, login: Login
+) -> None:
+    # RF-42: editar otro campo no exige cambiarle la categoría.
+    ana, space_id, mascotas, expense = deleted_category_setup(client, login)
+
+    response = client.patch(
+        f"/spaces/{space_id}/expenses/{expense['id']}",
+        json={"amount": 25000},
+        headers=ana,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["amount"] == 25000
+    assert response.json()["category_id"] == mascotas
