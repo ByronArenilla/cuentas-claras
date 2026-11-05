@@ -1,7 +1,7 @@
 # Spec 008 — Rubros e ingresos del mes
 
 - Fase: 1 — Aplicación y SDD
-- Estado: propuesta (2026-11-05)
+- Estado: aprobada (2026-11-05)
 - Base: spec 001 (aislamiento entre espacios), spec 002 (categorías y
   comparación de nombres, ADR 0006; esta spec añade eliminarlas), spec 003 (gastos y regla de periodo),
   spec 004 (presupuesto y resumen, ADR 0008), spec 007 (tablas de Telegram),
@@ -111,7 +111,7 @@ pedía el ADR 0004.
    conservar la tabla sin uso (un esquema con tablas huérfanas, lo que la
    007 descartó para Telegram).
 
-## Decisiones tomadas al redactar la spec (6 a 12, a revisar)
+## Decisiones tomadas al redactar la spec
 
 5. **Un gasto planeado está siempre en la categoría de su rubro.** Al
    registrarlo se indica el rubro **o** la categoría, nunca los dos. Si el
@@ -166,7 +166,7 @@ pedía el ADR 0004.
     con el mismo nombre (dos "Mascotas" en las estadísticas) y rechazar el
     nombre.
 
-## Decisiones tomadas al redactar la segunda ronda (a revisar)
+## Decisiones tomadas al redactar la segunda ronda
 
 17. **Un rubro cuya categoría se eliminó sigue funcionando en su mes**: se
     le registran gastos y se le cambian el nombre y el monto. Eliminar la

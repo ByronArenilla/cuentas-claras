@@ -1,6 +1,6 @@
 # Tareas 008 — Rubros e ingresos del mes
 
-- Spec: `spec.md` (propuesta) · Plan: `plan.md` (propuesto)
+- Spec: `spec.md` (aprobada) · Plan: `plan.md` (aprobado)
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 - Orden: primero las migraciones (T1), después expandir el esquema (T2), el

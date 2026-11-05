@@ -1,8 +1,8 @@
 # Plan 008 — Rubros e ingresos del mes
 
-- Spec: `spec.md` (estado: propuesta)
+- Spec: `spec.md` (estado: aprobada)
 - Servicio afectado: `services/api`
-- Estado: propuesto (2026-11-05)
+- Estado: aprobado (2026-11-05)
 
 La spec cambia una tabla que ya está en `main` (`expenses`) y retira otra
 (`budgets`), así que se cumple la condición de reemplazo del ADR 0004:
