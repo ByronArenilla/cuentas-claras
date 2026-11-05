@@ -124,7 +124,7 @@ pedía el ADR 0004.
    mes nuevo o dejarlo como no planeado.
 7. **Dos rubros del mismo mes no pueden llamarse igual**, con la misma
    comparación de nombres que las categorías (ADR 0006): "Mercado" y
-   "mercado" chocan. En otro mes o en otro espacio, sí pueden repetirse. Lo
+   "mercado" chocan, y también "Acción" y "accion" (ver decisión 22). En otro mes o en otro espacio, sí pueden repetirse. Lo
    mismo para los ingresos. Los nombres tienen de 1 a 50 caracteres, como
    las categorías.
 8. **Borrar un rubro nunca borra gastos.** Sus gastos pasan a ser no
@@ -179,10 +179,26 @@ pedía el ADR 0004.
     rubros ni gastos no planeados hasta crear o restaurar una.
 20. **Eliminar no pide confirmación**, porque no borra ningún dato y se
     deshace creando de nuevo la categoría (decisión 16). La web (011)
-    debería decir que sus rubros dejarán de copiarse.
+    debería decir que sus rubros dejarán de copiarse. Cambiada en la
+    tercera ronda (decisión 23): la respuesta avisa cómo volver a usarla.
 21. **Restaurar conserva el nombre original.** Si se eliminó "Mascotas" y
     alguien crea "mascotas", vuelve "Mascotas", como se ve en los meses
     pasados.
+
+## Tercera ronda de clarificación (2026-11-05)
+
+22. **Los nombres se comparan sin mayúsculas ni tildes**, en categorías,
+    rubros e ingresos: "Ahorro" = "ahorro", y "Acción" = "acción" =
+    "Accion" = "accion". Es la comparación de la 002 (ADR 0006), que ya
+    funciona así: ignora mayúsculas, tildes, diéresis y espacios alrededor.
+    La ñ sí cuenta: "Año" y "Ano" son nombres distintos. Vale para chocar
+    con un nombre activo y para restaurar uno eliminado (decisión 16):
+    eliminar "Acción" y crear "accion" restaura "Acción".
+23. **Al eliminar una categoría, la respuesta avisa que se puede volver a
+    usar creándola de nuevo** con el mismo nombre, y que sus rubros dejan
+    de copiarse al planear. El aviso lo escribe la API, en español, para
+    que la web (010 y 011) lo muestre tal cual. Sigue sin pedir
+    confirmación (decisión 20).
 
 ## Requisitos funcionales
 
@@ -365,7 +381,9 @@ pedía el ADR 0004.
 - **RF-39** CUANDO un miembro elimina una categoría de su espacio, el
   sistema DEBE dejar de devolverla en el listado de categorías, sin pedir
   confirmación, aunque tenga rubros o gastos en cualquier mes (decisiones
-  14, 19 y 20).
+  14, 19 y 20). La respuesta DEBE incluir un aviso que nombre la categoría
+  y diga que se puede volver a usar creándola de nuevo con el mismo
+  nombre, y que sus rubros dejarán de copiarse al planear (decisión 23).
 - **RF-40** Eliminar una categoría NUNCA DEBE borrar ni cambiar rubros ni
   gastos. Los que la tenían, de cualquier mes, DEBEN conservarla y seguir
   contando en el resumen (decisión 14, principio 8).
@@ -378,8 +396,8 @@ pedía el ADR 0004.
   su mes y cambios de nombre y monto. Un gasto con categoría eliminada DEBE
   poder editarse sin cambiarle la categoría (decisión 17).
 - **RF-43** CUANDO un miembro crea una categoría con un nombre equivalente,
-  según la comparación de la 002, al de una categoría eliminada del mismo
-  espacio, el sistema DEBE restaurar esa categoría con su identificador y
+  según la comparación de la 002 (decisión 22), al de una categoría
+  eliminada del mismo espacio, el sistema DEBE restaurar esa categoría con su identificador y
   su nombre original, en lugar de crear otra, e indicar que se restauró
   (decisiones 16 y 21). Si el nombre es el de una categoría activa, se
   rechaza como hoy (RF-8 de la 002).
@@ -449,13 +467,19 @@ La spec se da por cumplida cuando, además de los tests por requisito:
     - el rubro de noviembre sigue aceptando gastos;
     - un rubro nuevo o un gasto no planeado con "Mascotas" se rechazan;
     - copiar noviembre a diciembre omite su rubro y lo dice;
+    - la respuesta de eliminar trae el aviso de que se puede volver a usar
+      creándola de nuevo;
     - crear "mascotas" la restaura con el mismo identificador y el nombre
       "Mascotas", y desde entonces se copia y se usa de nuevo
     (RF-13, RF-39 a RF-43).
 14. Un test comprueba que eliminar una categoría ya eliminada, de otro
     espacio o inexistente responde `404`, y que se pueden eliminar las
     predefinidas (RF-44, decisión 19).
-15. `make test` y `make lint` pasan en verde.
+15. Un test elimina "Acción" y comprueba que crear "accion", "Accion" o
+    "ACCIÓN" la restaura como "Acción", y que "Ahorro" activa choca con
+    "ahorro". Otro comprueba que "Año" y "Ano" conviven. Lo mismo con los
+    nombres de rubros e ingresos de un mes (RF-3, RF-43, decisión 22).
+16. `make test` y `make lint` pasan en verde.
 
 ## Requisitos para otras specs y documentos
 

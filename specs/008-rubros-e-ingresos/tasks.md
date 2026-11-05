@@ -56,7 +56,9 @@ eliminadas; `POST /categories` restaurando una eliminada; `check_category`
 rechazando una eliminada con su propio mensaje.
 
 - Test primero (`test_categories.py` y `test_expenses.py`):
-  - Eliminar responde `204` y la categoría deja de salir en el listado.
+  - Eliminar responde `200` con `id`, `name` y el aviso de que se puede
+    volver a usar creándola de nuevo, y la categoría deja de salir en el
+    listado.
   - Los gastos que la tenían siguen iguales, con la misma categoría.
   - Un gasto nuevo con la categoría eliminada, o cambiar a ella la de un
     gasto, responde `422` "La categoría «Mascotas» fue eliminada…"; editar
@@ -66,9 +68,12 @@ rechazando una eliminada con su propio mensaje.
   - Crear "mascotas" con "Mascotas" eliminada responde `200` con el mismo
     `id` y el nombre "Mascotas", y vuelve a salir en el listado. Crear el
     nombre de una activa sigue respondiendo `409`.
+  - Criterio 15: con "Acción" eliminada, crear "accion", "Accion" o
+    "ACCIÓN" la restaura como "Acción"; con "Ahorro" activa, "ahorro"
+    responde `409`; "Año" y "Ano" conviven.
   - Los tests de la 002 siguen en verde.
 - Hecho cuando: los tests pasan.
-- RF: RF-39 a RF-41, RF-43, RF-44.
+- RF: RF-39 a RF-41, RF-43, RF-44; decisiones 22 y 23.
 
 ## [ ] T4 — Esquemas y `previous_period`
 `schemas.py`: `BudgetItemIn`, `BudgetItemPatch`, `BudgetItemOut`,
@@ -96,8 +101,8 @@ rechazando una eliminada con su propio mensaje.
 - Test primero (`test_budget_items.py`):
   - Crear responde `201` con `BudgetItemOut`; un periodo pasado y uno futuro
     funcionan.
-  - Criterio 2: "mercado" choca con "Mercado" (`409`, nombrando el que
-    existe); en otro mes, no.
+  - Criterio 2: "mercado" choca con "Mercado" y "accion" con "Acción"
+    (`409`, nombrando el que existe); en otro mes, no.
   - Una categoría de otro espacio responde `422` y no guarda nada; una
     eliminada, `422` con su mensaje, al crear y al cambiar la categoría.
   - Editar cambia solo lo enviado; el periodo no se puede cambiar. Un rubro
@@ -118,8 +123,9 @@ rechazando una eliminada con su propio mensaje.
 `main.py`.
 
 - Test primero (`test_incomes.py`):
-  - Crear responde `201` con `IncomeOut`; "salario" choca con "Salario" en
-    el mismo mes (`409`) y no en otro.
+  - Crear responde `201` con `IncomeOut`; "salario" choca con "Salario" y
+    "bonificacion" con "Bonificación" en el mismo mes (`409`), y no en
+    otro.
   - Editar cambia solo lo enviado; borrar responde `204` sin confirmación.
   - Un ingreso inexistente o de otro espacio responde `404` "Ingreso no
     encontrado.".
@@ -260,7 +266,7 @@ debería hacer falta código nuevo; si algún test falla, se corrige aquí.
   eliminar y restaurar categorías, y el resumen nuevo, con ejemplos `curl`;
   una sección de migraciones con la copia de la base antes de la 008 y
   cómo volver atrás (RF-38).
-- Repasar los quince criterios de validación de la spec.
+- Repasar los dieciséis criterios de validación de la spec.
 - Proponer el cambio del glosario de `AGENTS.md` y aplicarlo solo con
   aprobación explícita.
 - `docs/roadmap.md`: marcar `008-rubros-e-ingresos` como terminada y dejar

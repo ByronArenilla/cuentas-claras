@@ -45,6 +45,8 @@ viejos y borra lo que sobra. Así cada tarea deja la API funcionando.
 | Eliminar una categoría | Columna nueva `categories.deleted_at` (nula), añadida en la `0002`; `DELETE` la rellena | Decisión 14: archivar, no borrar. Rubros y gastos siguen apuntando a la misma fila. Se descartaron borrar la fila (dejaría rubros y gastos sin categoría, principio 8) y una tabla aparte de eliminadas (mover la fila cambiaría su `id` y rompería las referencias). |
 | Categorías que se pueden elegir | `check_category` y `GET /categories` filtran `deleted_at IS NULL`. Una eliminada del propio espacio responde `422` con su propio mensaje | RF-39 y RF-41. Una categoría de otro espacio sigue respondiendo como inexistente (RF-5 de la 003). Una eliminada es del propio espacio, así que no hay nada que ocultar y el mensaje puede decir cómo restaurarla. |
 | Restaurar | En `POST /categories`, si el `name_key` es de una eliminada, se pone `deleted_at = NULL` y se responde `200` con la categoría, en lugar de `201` | RF-43 y decisión 21. El índice único `(space_id, name_key)` de la 002 ya incluye las eliminadas, así que nunca puede haber dos con el mismo nombre. El `200` dice "no se creó nada nuevo" sin cambiar la forma de la respuesta. |
+| Respuesta al eliminar una categoría | `200` con `{"id", "name", "message"}` en lugar de `204` sin cuerpo | Decisión 23: el aviso lo arma la API, como el resto de los mensajes al usuario, y la web lo muestra tal cual. Es la única ruta `DELETE` que responde con cuerpo, porque es la única que tiene algo que avisar. |
+| Comparación de nombres | `category_key` de la 002, sin cambios, también para rubros e ingresos | Decisión 22: ya ignora mayúsculas, tildes, diéresis y espacios alrededor, y respeta la ñ (ADR 0006). |
 | Autocompletar el rubro al registrar | Ninguna ruta nueva | Decisión 13: la web (010) filtra los rubros que ya trae el resumen del mes. Un mes tiene pocas decenas de rubros. |
 | Rutas para leer el plan | Ninguna aparte: el resumen trae rubros e ingresos con sus identificadores | Como en el plan 004, lo que la web necesita ya va en el resumen. Si la 011 necesita otra cosa, la añade. |
 | Retiro del presupuesto | La `0003` convierte `budgets` en rubros con `INSERT … SELECT` y borra la tabla. Salen `Budget`, `BudgetIn`, `BudgetOut` y `app/routers/budgets.py` | Decisión 4 y RF-27. La conversión es SQL dentro de la migración: no puede importar los modelos, que ya no tienen `Budget`. |
@@ -219,7 +221,7 @@ recorre las rutas con `{space_id}` las vigila sin cambios. [RF-28]
 | `PATCH /spaces/{space_id}/incomes/{income_id}` | Edita nombre o monto | `200`; `404` "Ingreso no encontrado."; `409`; `422` | RF-11, RF-12 |
 | `DELETE /spaces/{space_id}/incomes/{income_id}` | Borra el ingreso | `204`; `404` | RF-11, RF-12 |
 | `POST /spaces/{space_id}/plan/copy` | Copia el plan del mes anterior al `period` del cuerpo, sin los rubros de categorías eliminadas | `201` `PlanCopyOut`; `409` destino con plan u origen sin nada que copiar | RF-13 a RF-16 |
-| `DELETE /spaces/{space_id}/categories/{category_id}` | Elimina (archiva) la categoría | `204`; `404` "Categoría no encontrada." si no existe, es de otro espacio o ya está eliminada | RF-39, RF-40, RF-44 |
+| `DELETE /spaces/{space_id}/categories/{category_id}` | Elimina (archiva) la categoría | `200` `CategoryDeletedOut`; `404` "Categoría no encontrada." si no existe, es de otro espacio o ya está eliminada | RF-39, RF-40, RF-44 |
 | `POST /spaces/{space_id}/categories` | Como en la 002; si el nombre es de una eliminada, la restaura | `201` creada; `200` restaurada; `409` nombre de una activa | RF-43 |
 | `GET /spaces/{space_id}/summary?period=` | Resumen nuevo | `200` `SummaryOut`; `422` periodo mal escrito | RF-23 a RF-26 |
 
@@ -236,6 +238,9 @@ Mensajes:
   de 2026-11. Elige un rubro de 2026-11 o regístralo como no planeado."
 - Cambiar la categoría de un gasto planeado: `422` "El gasto está en el
   rubro «Mercado» y usa su categoría. Para cambiarla, quítale el rubro."
+- Aviso al eliminar una categoría (`message`): "Eliminaste «Mascotas». Sus
+  rubros y gastos la conservan, pero sus rubros ya no se copiarán al
+  planear. Para volver a usarla, créala de nuevo con el mismo nombre."
 - Categoría eliminada en un rubro o un gasto: `422` "La categoría «Mascotas»
   fue eliminada. Para usarla de nuevo, créala otra vez con el mismo
   nombre."
@@ -299,8 +304,9 @@ Funciones sin HTTP (principio 10), todas filtradas por `space_id`
   bordes del periodo de la 004.
 - `test_plan.py`: criterios 1, 3 y 6 por HTTP, y el `404` de la ruta de la
   004 (criterio 11).
-- `test_categories.py`: eliminar, el listado sin eliminadas, restaurar con
-  el nombre original, y los `404` (criterios 13 y 14). Los tests de la 002
+- `test_categories.py`: eliminar con su aviso, el listado sin eliminadas,
+  restaurar con el nombre original sin importar mayúsculas ni tildes, y los
+  `404` (criterios 13 a 15). Los tests de la 002
   siguen en verde.
 - `test_isolation.py`: criterio 12.
 - `test_retired_bot.py`: el criterio 4 de la 007 (las tablas de Telegram
