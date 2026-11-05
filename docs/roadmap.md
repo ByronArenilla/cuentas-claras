@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 008-partidas-e-ingresos
+> **Spec activa:** 008-rubros-e-ingresos
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -21,16 +21,18 @@ está validada. Marca con [x] las specs terminadas.
   - Sale `services/bot/` y, de la API, las rutas `/telegram/*` y
     `BOT_API_KEY`. Se queda `GET /spaces/{space_id}/expenses/recent`, que
     también usa la web.
-- [ ] 008-partidas-e-ingresos — Partidas con nombre libre y categoría, ingresos del mes y plan copiado del mes anterior.
+- [ ] 008-rubros-e-ingresos — Rubros con nombre libre y categoría, ingresos del mes y plan copiado del mes anterior.
   - Cambia el presupuesto por categoría con vigencia de la 004 (ADR 0008) y
-    da a cada gasto una partida o la marca de "no planeado".
+    da a cada gasto un rubro o la marca de "no planeado".
+  - Se llamaba "partidas"; se cambió a "rubro" en la clarificación
+    (2026-11-05).
   - Cambia tablas que ya están en `main`, así que **entran las migraciones
     con Alembic** con un ADR que reemplaza al 0004 y otro que reemplaza al
     0008. La primera migración decide qué pasa con las tablas de Telegram
     que dejan las bases ya creadas (spec 007).
 - [ ] 009-tarjetas-y-cuotas — Tarjetas con corte, pago y tasa; compras a cuotas y la deuda que llega cada mes.
-  - Una compra a 1 cuota cuenta en su partida el mes de la compra. Una a
-    varias cuotas no se descuenta de su partida: cada cuota entra en Deudas
+  - Una compra a 1 cuota cuenta en su rubro el mes de la compra. Una a
+    varias cuotas no se descuenta de su rubro: cada cuota entra en Deudas
     el mes en que se paga. El mes del pago sale del día de corte.
   - Los intereses son una estimación con la tasa mensual de la tarjeta, que
     es opcional. Al planear se escribe el valor real del extracto.
