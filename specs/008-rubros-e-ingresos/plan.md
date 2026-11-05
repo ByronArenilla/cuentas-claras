@@ -6,14 +6,18 @@
 
 La spec cambia una tabla que ya está en `main` (`expenses`) y retira otra
 (`budgets`), así que se cumple la condición de reemplazo del ADR 0004:
-entra Alembic. El plan tiene dos mitades:
+entra Alembic. El plan tiene tres partes:
 
 1. **Migraciones**: Alembic, una migración inicial que adopta cualquier
-   base creada con `create_all`, y la API aplicándolas al arrancar.
+   base creada con `create_all`, y la API aplicándolas al arrancar. Lo
+   decide el [ADR 0011](../../docs/adr/0011-migraciones-con-alembic.md),
+   que reemplaza al 0004.
 2. **Plan del mes**: rubros, ingresos, copia del plan, gastos con rubro y
-   el resumen nuevo, y el retiro del presupuesto de la 004.
+   el resumen nuevo, y el retiro del presupuesto de la 004. Lo decide el
+   [ADR 0012](../../docs/adr/0012-plan-mensual-con-rubros-e-ingresos.md),
+   que reemplaza al 0008.
 3. **Categorías eliminadas**: eliminar una categoría la archiva, y crearla
-   de nuevo la restaura.
+   de nuevo la restaura (también en el ADR 0012).
 
 Los cambios de esquema siguen el patrón **expandir y contraer**
 ([*parallel change*](https://martinfowler.com/bliki/ParallelChange.html)):

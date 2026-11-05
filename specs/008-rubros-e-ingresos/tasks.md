@@ -241,7 +241,7 @@ debería hacer falta código nuevo; si algún test falla, se corrige aquí.
 - Hecho cuando: los tests pasan.
 - RF: RF-9, RF-12, RF-18, RF-28 a RF-30, RF-44.
 
-## [ ] T12 — ADR 0011 y ADR 0012
+## [x] T12 — ADR 0011 y ADR 0012
 - `docs/adr/0011-migraciones-con-alembic.md`: Alembic al arrancar, la
   `0001` idempotente en lugar de `alembic stamp`, sin `downgrade`, los
   tests con `create_all` vigilados por `compare_metadata`, y el riesgo del

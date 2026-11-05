@@ -1,7 +1,7 @@
 # ADR 0008 — El presupuesto rige desde un periodo
 
 - Fecha: 2026-11-04
-- Estado: aceptada
+- Estado: reemplazada por ADR 0012
 - Fase / spec: 1 / 004-presupuesto-mensual
 
 ## Contexto
