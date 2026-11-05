@@ -1,8 +1,11 @@
 # gastito
 
 App para controlar el presupuesto mensual, en solitario o compartido con
-otras personas: los gastos se registran conversando con un bot de Telegram y
-se consultan en un dashboard web.
+otras personas. El mes se planea en el computador y cada gasto se registra
+desde el celular, en la misma app web: se fija en la pantalla de inicio desde
+el navegador y se abre como una aplicación, sin descargar nada de una tienda.
+La web llega con la spec 010; mientras tanto, todo se hace con la API (ver
+"Registrar gastos mientras llega la web").
 
 Es mi proyecto de portafolio DevOps. La aplicación es pequeña a propósito y
 la infraestructura crece por fases: Docker, Nginx, GitHub Actions, AWS,
@@ -17,19 +20,31 @@ Fase actual y spec activa: ver [`docs/roadmap.md`](docs/roadmap.md).
 Requiere Python 3.12 y `make`.
 
 ```sh
-make install          # crea el entorno virtual de la API y del bot
+make install          # crea el entorno virtual de la API
 cp .env.example .env  # y rellena los valores
 make run-api          # http://localhost:8000
-make run-bot          # el bot de Telegram (ver "Bot de Telegram")
-make test             # tests de la API y del bot
+make test             # tests de la API
 make lint             # ruff check y ruff format --check
 ```
 
-Si falta `DATABASE_URL`, `TZ`, `WEB_BASE_URL` o `BOT_API_KEY`, la API no
-arranca y dice cuál falta. `BOT_API_KEY` es el secreto que comparten la API
-y el bot; debe tener al menos 32 caracteres y se genera con
-`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. La documentación interactiva de la API está en
+Si falta `DATABASE_URL`, `TZ` o `WEB_BASE_URL`, la API no arranca y dice
+cuál falta. La documentación interactiva de la API está en
 http://localhost:8000/docs.
+
+**Si tu `.env` es de antes de la spec 007**, puede tener `TELEGRAM_BOT_TOKEN`
+y `BOT_API_KEY`. Ya no se usan y puedes borrarlas; si se quedan, la API
+arranca igual y las ignora.
+
+## Registrar gastos mientras llega la web
+Hasta la spec 010 no hay app web, así que los gastos se registran con la
+API, de dos formas:
+
+- **Con `curl`**, como en los ejemplos de este README: primero
+  `POST /auth/login` para obtener el token y después
+  `POST /spaces/{id}/expenses` (ver "Gastos").
+- **Desde http://localhost:8000/docs**: inicia sesión con
+  `POST /auth/login` en "Try it out", copia el `token`, pégalo en el botón
+  **Authorize** y prueba cualquier ruta desde el navegador.
 
 ## Usuarios, espacios e invitaciones
 Los datos pertenecen a un **espacio**, no a una persona. Cada usuario tiene
@@ -85,7 +100,7 @@ solo a quien se invita.
    ```
 
 Un enlace desconocido, usado o caducado se rechaza con el mismo mensaje. La
-página `/unirse/...` de la web llegará con `007-dashboard-web`; hasta
+página `/unirse/...` de la web llegará con `010-app-web`; hasta
 entonces, `<invitación>` es la última parte de la `url` y el canje se hace
 contra la API.
 
@@ -177,13 +192,22 @@ curl -X PATCH localhost:8000/spaces/1/expenses/1 \
 ```
 
 **Borrar.** Es definitivo, así que exige `confirm=true`. Sin la
-confirmación responde `400` y no borra nada. El bot y la web preguntarán
-antes de enviarla.
+confirmación responde `400` y no borra nada. La web preguntará antes de
+enviarla.
 
 ```sh
 curl -X DELETE 'localhost:8000/spaces/1/expenses/2?confirm=true' \
   -H 'Authorization: Bearer <token de Ana>'
 # 204, sin cuerpo
+```
+
+**Últimos registrados.** Los últimos gastos registrados del espacio, de
+cualquier mes, del registrado más recientemente al más antiguo. `limit` va
+de 1 a 20 (5 por defecto) y `mine=true` deja solo los tuyos.
+
+```sh
+curl 'localhost:8000/spaces/1/expenses/recent?limit=5&mine=false' \
+  -H 'Authorization: Bearer <token de Ana>'
 ```
 
 ## Presupuesto y resumen
@@ -201,8 +225,8 @@ Cualquier miembro del espacio puede fijarlo, cambiarlo o quitarlo.
   pasado, actual o futuro; si no se envía, es el mes actual en `TZ`.
   Cambiar un mes pasado cambia también los meses que lo heredan.
 
-Por ahora el presupuesto solo se fija con la API; el bot y la web lo
-mostrarán en las specs 006 y 007.
+Por ahora el presupuesto solo se fija con la API; la web lo mostrará a
+partir de la spec 010.
 
 **Fijar.** `PUT` sobre la categoría (aquí la 2, Comida). Repetirlo con el
 mismo mes reemplaza el monto.
@@ -248,77 +272,13 @@ curl 'localhost:8000/spaces/1/summary?period=2026-11' \
 - `total.spent` suma todos los gastos del mes, también los de categorías
   sin presupuesto; `total.budget` suma solo los presupuestos que existen.
 
-## Bot de Telegram
-El bot registra gastos conversando: pregunta el monto, el espacio (si tienes
-varios), la categoría, el tipo de pago, la fecha y una descripción opcional,
-y te muestra todo antes de guardarlo. Nada se registra hasta que tocas
-**Confirmar**. Solo atiende chats privados.
-
-**1. Crear el bot.** Habla con [@BotFather](https://t.me/BotFather) en
-Telegram, envía `/newbot` y copia el token que te da en
-`TELEGRAM_BOT_TOKEN` de `.env`. Pon también `API_URL`, `BOT_API_KEY` (la
-misma que usa la API) y `TZ`.
-
-**2. Arrancar.** En dos terminales:
-
-```sh
-make run-api
-make run-bot   # se conecta a Telegram y espera mensajes
-```
-
-**3. Vincular tu chat.** El bot solo atiende chats vinculados a una cuenta
-de gastito. Pide un código con tu sesión (dura 10 minutos y sirve una vez):
-
-```sh
-curl -X POST localhost:8000/telegram/link-codes \
-  -H 'Authorization: Bearer <token de Ana>'
-# {"code": "YJ31-8F5C", "expires_at": "..."}
-```
-
-y envíaselo al bot: `/vincular YJ31-8F5C`. Responde con el correo de la
-cuenta vinculada. `/desvincular` lo deshace. Cuando exista la web, el
-código se pedirá desde ahí. Cómo funciona la vinculación:
-[ADR 0009](docs/adr/0009-vinculacion-del-chat-y-llave-del-bot.md).
-
-**4. Registrar un gasto.** Escribe `/gasto`, `/gasto 20000` o solo el
-monto (`20.000` o `$20.000`, en pesos enteros y sin decimales). Al
-confirmar, el bot te dice cómo va el presupuesto de esa categoría:
-
-```
-Gasto registrado: $ 20.000 en Comida.
-Comida: llevas $ 412.000 de $ 400.000 en noviembre. Te pasaste por $ 12.000.
-```
-
-`/cancelar` descarta el gasto en cualquier paso, y un gasto sin respuesta
-durante 10 minutos se descarta solo.
-
-**5. Consultar y deshacer.** Si tienes varios espacios, el bot pregunta de
-cuál con botones.
-
-- `/resumen`: cómo vas este mes frente al presupuesto, con el total y las
-  categorías que tienen presupuesto o gastos. Los botones `‹` y `›` llevan
-  al mes anterior o al siguiente.
-
-  ```
-  Casa · noviembre de 2026
-  Gastado: $ 450.000 de $ 500.000. Te quedan $ 50.000.
-
-  Comida: $ 412.000 de $ 400.000. Te pasaste por $ 12.000.
-  Transporte: $ 38.000. Sin presupuesto.
-  ```
-
-- `/ultimos`: los cinco últimos gastos registrados en el espacio, de
-  cualquier mes, con los de otros miembros marcados.
-- `/deshacer`: muestra el último gasto que registraste, en cualquiera de tus
-  espacios, y lo borra solo si tocas **Borrar**.
-
-Estos botones siguen funcionando aunque el bot se reinicie, y usarlos no
-interrumpe un gasto que estés registrando. El bot registra sus comandos en
-el menú de Telegram al arrancar, así que aparecen al escribir `/`. `/ayuda`
-los muestra todos.
-
-La API ofrece además `GET /spaces/{id}/expenses/recent?limit=5&mine=false`:
-los últimos gastos registrados del espacio, de cualquier mes.
+## Historia: el bot de Telegram
+Las specs 005 y 006 registraban gastos conversando con un bot de Telegram.
+Se retiró en la spec 007: los gastos se registran solo desde la app web,
+que en el celular se fija en la pantalla de inicio. El porqué está en el
+[ADR 0010](docs/adr/0010-registro-solo-desde-la-app-web.md). Las tablas
+`telegram_link_codes` y `telegram_chats` que tengan las bases creadas antes
+siguen ahí sin uso; las borra la primera migración de la spec 008.
 
 ## Documentos clave
 - [`docs/constitution.md`](docs/constitution.md): principios innegociables.

@@ -30,11 +30,12 @@ modifican con un ADR aprobado en `docs/adr/`, y eso debería ocurrir casi nunca.
    explícita y ningún cambio de estructura destruye datos existentes.
 
 ## Arquitectura
-9. **Servicios desacoplados**: `api`, `bot` y `web` son servicios
-   independientes. Solo la API accede a la base de datos; el bot y la web la
-   usan por HTTP.
+9. **Servicios desacoplados**: `api` y `web` son servicios independientes.
+   Solo la API accede a la base de datos; la web la usa por HTTP. Los gastos
+   se registran desde la web, que en el celular se fija en la pantalla de
+   inicio desde el navegador. (ADR 0010)
 10. **Lógica separada de la interfaz**: las reglas de negocio viven en la API
-    y se prueban sin HTTP ni Telegram. El bot y la web son capas finas.
+    y se prueban sin HTTP. La web es una capa fina.
 11. **Configuración por entorno**: todo lo que cambia entre entornos entra por
     variables de entorno. El mismo código corre en local, en Docker y en
     Kubernetes.
@@ -43,9 +44,9 @@ modifican con un ADR aprobado en `docs/adr/`, y eso debería ocurrir casi nunca.
 12. **Secretos fuera de Git**: ningún token, contraseña o llave en el
     repositorio. `.env.example` nunca lleva valores reales.
 13. **Acceso restringido**: cada persona se autentica y solo alcanza los
-    espacios de los que es miembro. El bot solo atiende a chats vinculados
-    a un usuario registrado y la web exige autenticación. Ninguna consulta
-    a la base de datos devuelve datos sin filtrar por espacio. (ADR 0001)
+    espacios de los que es miembro. La web exige autenticación. Ninguna
+    consulta a la base de datos devuelve datos sin filtrar por espacio.
+    (ADR 0001)
 14. **Todo como código y reproducible**: infraestructura, configuración,
     despliegues y dashboards viven en el repositorio, y el entorno se recrea
     desde cero sin pasos manuales no documentados. Un cambio manual en un

@@ -73,8 +73,9 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
 
 def create_session(db: Session, user_id: int, lifetime: timedelta) -> TokenOut:
     """Crea una sesión que caduca tras `lifetime` y entrega su token; guarda
-    solo el hash (RF-8). La usan el inicio de sesión (15 días) y el bot (una
-    hora, spec 005)."""
+    solo el hash (RF-8). La usa el inicio de sesión (15 días); la duración
+    sigue siendo un parámetro aunque el bot que pedía una hora se retiró
+    (spec 007, decisión 4)."""
     token = generate_session_token()
     session = SessionRow(
         token_hash=hash_token(token),

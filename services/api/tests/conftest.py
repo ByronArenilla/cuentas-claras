@@ -10,9 +10,9 @@ os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["TZ"] = "America/Bogota"
 WEB_BASE_URL = "http://web.test"
 os.environ["WEB_BASE_URL"] = WEB_BASE_URL
-# Llave del bot de prueba (spec 005): 32 caracteres, el mínimo.
-BOT_API_KEY = "llave-de-prueba-del-bot-32-chars"
-os.environ["BOT_API_KEY"] = BOT_API_KEY
+# El bot se retiró (spec 007): si el entorno de quien corre los tests aún
+# tiene su llave, se quita para probar la API tal como arranca ahora.
+os.environ.pop("BOT_API_KEY", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import Engine  # noqa: E402

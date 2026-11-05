@@ -1,7 +1,7 @@
 # ADR 0009 — Vinculación del chat con código y llave del bot
 
 - Fecha: 2026-11-04
-- Estado: aceptada
+- Estado: reemplazada por ADR 0010
 - Fase / spec: 1 / 005-bot-registro-guiado
 
 ## Contexto

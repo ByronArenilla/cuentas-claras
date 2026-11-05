@@ -1,5 +1,4 @@
-"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15) y de códigos
-de vinculación de Telegram (spec 005).
+"""Hash de contraseñas y generación de tokens (RF-6, RF-8, RF-15).
 
 Contraseñas y tokens se tratan distinto a propósito. Una contraseña la elige
 una persona y se puede adivinar: necesita un hash lento y con sal (Argon2id).
@@ -44,25 +43,3 @@ def generate_invitation_token() -> str:
 def hash_token(token: str) -> str:
     """SHA-256 en hexadecimal: lo único que se guarda de un token."""
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-# Crockford base32: sin I, L, O ni U, que se confunden con 1, 0 o V al
-# copiar el código a mano (plan 005).
-LINK_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-LINK_CODE_LENGTH = 8
-
-
-def generate_link_code() -> str:
-    """Código de vinculación aleatorio de 40 bits, como `ABCD-EFGH`.
-
-    Con 10 minutos de vida (RF-1), probar códigos a través de Telegram no
-    llega a acertar ninguno. El guion solo ayuda a leerlo.
-    """
-    chars = "".join(secrets.choice(LINK_CODE_ALPHABET) for _ in range(LINK_CODE_LENGTH))
-    return f"{chars[:4]}-{chars[4:]}"
-
-
-def normalize_link_code(typed: str) -> str:
-    """El código como se guarda su hash: sin espacios ni guiones y en
-    mayúsculas, así `abcd-efgh` y `ABCD EFGH` son el mismo código."""
-    return "".join(char for char in typed.upper() if char not in " -")
