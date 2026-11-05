@@ -341,8 +341,8 @@ class BudgetOut(BaseModel):
 
 
 class CategorySummaryOut(BaseModel):
-    # Con el nombre de la categoría: el resumen es lo que el bot y la web
-    # muestran tal cual (plan 004).
+    # Con el nombre de la categoría: el resumen es lo que la web muestra tal
+    # cual (plan 004).
     category_id: int
     name: str
     budget: int | None

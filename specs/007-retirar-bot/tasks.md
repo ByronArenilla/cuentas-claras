@@ -40,7 +40,7 @@ API.
 - Hecho cuando: `services/bot/` no existe y los tres targets pasan.
 - RF: RF-7, RF-8.
 
-## [ ] T3 — Documentación y cierre
+## [x] T3 — Documentación y cierre
 README sin la sección del bot y con cómo registrar gastos hasta la 010;
 roadmap con la 007 hecha.
 

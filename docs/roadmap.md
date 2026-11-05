@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 007-retirar-bot
+> **Spec activa:** 008-partidas-e-ingresos
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -17,7 +17,7 @@ está validada. Marca con [x] las specs terminadas.
 - [x] 006-bot-consultas — Comandos /resumen, /ultimos y /deshacer.
   - Las specs 005 y 006 quedan como historia: el bot se retira en la 007
     (ADR 0010).
-- [ ] 007-retirar-bot — Quitar el bot de Telegram; el registro pasa a la app web.
+- [x] 007-retirar-bot — Quitar el bot de Telegram; el registro pasa a la app web.
   - Sale `services/bot/` y, de la API, las rutas `/telegram/*` y
     `BOT_API_KEY`. Se queda `GET /spaces/{space_id}/expenses/recent`, que
     también usa la web.
