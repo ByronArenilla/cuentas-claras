@@ -1,22 +1,27 @@
 """Gastos de un espacio: registrar, consultar, listar, editar y borrar (spec 003),
-y los últimos registrados (spec 006).
+los últimos registrados (spec 006) y el rubro de cada gasto (spec 008).
+
+Un gasto planeado lleva un rubro de su mismo mes y la categoría de ese rubro;
+uno no planeado, solo su categoría (decisiones 5, 6 y 13 de la 008).
 
 Las rutas reciben el espacio por `member_space`, nunca consultando por
 `space_id` directamente (RF-19; RF-28 y RF-29 de la 001).
 """
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
 from app.deps import current_user, member_space, requested_period
-from app.models import Expense, Space, User
+from app.models import BudgetItem, Expense, Space, User
 from app.routers.categories import usable_category
-from app.schemas import ExpenseIn, ExpenseOut, ExpensePatch
+from app.schemas import EXACTLY_ONE_MESSAGE, ExpenseIn, ExpenseOut, ExpensePatch
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
 
@@ -24,6 +29,47 @@ EXPENSE_NOT_FOUND = HTTPException(status.HTTP_404_NOT_FOUND, "Gasto no encontrad
 UNCONFIRMED_DELETE = HTTPException(
     status.HTTP_400_BAD_REQUEST, "Para borrar el gasto, confirma con confirm=true."
 )
+ITEM_NOT_IN_SPACE = HTTPException(
+    status.HTTP_422_UNPROCESSABLE_CONTENT, "El rubro no existe en este espacio."
+)
+EXACTLY_ONE = HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, EXACTLY_ONE_MESSAGE)
+
+
+def item_in_space(db: Session, space_id: int, item_id: int) -> BudgetItem:
+    """Rubro del cuerpo, solo si es del espacio. Uno de otro espacio responde
+    igual que uno inexistente (RF-18 de la 008), como la categoría."""
+    item = db.scalar(
+        select(BudgetItem).where(
+            BudgetItem.id == item_id, BudgetItem.space_id == space_id
+        )
+    )
+    if item is None:
+        raise ITEM_NOT_IN_SPACE
+    return item
+
+
+def check_same_month(item: BudgetItem, spent_on: date) -> None:
+    """Un gasto solo va en un rubro de su mismo mes (RF-19, decisión 6)."""
+    item_period = dates.period_of(item.period_start)
+    expense_period = dates.period_of(spent_on)
+    if item_period != expense_period:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"El rubro «{item.name}» es de {item_period} y el gasto es de "
+            f"{expense_period}. Elige un rubro de {expense_period} o regístralo "
+            "como no planeado.",
+        )
+
+
+def commit_or_missing_item(db: Session) -> None:
+    """Guarda; si otro miembro borró el rubro entre la comprobación y el
+    guardado, la clave foránea frena el gasto y se responde como rubro
+    inexistente, no como un error 500 (plan 008, riesgos)."""
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ITEM_NOT_IN_SPACE from None
 
 
 def space_expense(
@@ -53,15 +99,29 @@ def create_expense(
     db: Annotated[Session, Depends(get_db)],
 ) -> ExpenseOut:
     """Registra un gasto en el espacio de la ruta, a nombre de quien llama
-    (RF-1). El espacio y el autor nunca salen del cuerpo (RF-14)."""
-    # La categoría debe ser del espacio (RF-5) y estar activa (RF-41 de la
-    # 008). La base de datos no lo garantiza: haría falta una clave foránea
-    # compuesta que cambia la tabla `categories` (plan 003).
-    usable_category(db, space.id, data.category_id)
+    (RF-1). El espacio y el autor nunca salen del cuerpo (RF-14).
 
-    expense = Expense(**data.model_dump(), space_id=space.id, created_by=user.id)
+    Con rubro, la categoría es la del rubro, aunque esté eliminada (RF-20,
+    RF-42 de la 008). Sin rubro, la categoría debe ser del espacio (RF-5) y
+    estar activa (RF-41 de la 008). La base de datos no lo garantiza: haría
+    falta una clave foránea compuesta que cambia la tabla `categories`
+    (plan 003).
+    """
+    if data.budget_item_id is not None:
+        item = item_in_space(db, space.id, data.budget_item_id)
+        check_same_month(item, data.spent_on)
+        category_id = item.category_id
+    else:
+        category_id = usable_category(db, space.id, data.category_id).id
+
+    expense = Expense(
+        **data.model_dump(exclude={"category_id"}),
+        category_id=category_id,
+        space_id=space.id,
+        created_by=user.id,
+    )
     db.add(expense)
-    db.commit()
+    commit_or_missing_item(db)
     return ExpenseOut.model_validate(expense)
 
 
@@ -117,6 +177,45 @@ def read_expense(expense: Annotated[Expense, Depends(space_expense)]) -> Expense
     return ExpenseOut.model_validate(expense)
 
 
+def item_changes(db: Session, expense: Expense, changes: dict) -> dict:
+    """Rubro y categoría que tendrá el gasto tras la edición, con las reglas
+    del plan 008 ("Editar un gasto"). Valida todo antes de que la ruta
+    escriba nada (RF-19, RF-21, RF-41).
+    """
+    spent_on = changes.get("spent_on", expense.spent_on)
+
+    if "budget_item_id" in changes and changes["budget_item_id"] is not None:
+        # 1 y 2: ligarlo a un rubro. Con categoría a la vez, se rechaza.
+        if "category_id" in changes:
+            raise EXACTLY_ONE
+        item = item_in_space(db, expense.space_id, changes["budget_item_id"])
+        check_same_month(item, spent_on)
+        return {"category_id": item.category_id}
+
+    if "budget_item_id" in changes:
+        # 3: quitarle el rubro. Queda con la categoría enviada o la que tenía.
+        if "category_id" in changes:
+            usable_category(db, expense.space_id, changes["category_id"])
+        return {}
+
+    if expense.budget_item_id is not None:
+        item = db.get_one(BudgetItem, expense.budget_item_id)
+        # 4: la categoría de un gasto planeado es la de su rubro.
+        if "category_id" in changes:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"El gasto está en el rubro «{item.name}» y usa su categoría. "
+                "Para cambiarla, quítale el rubro.",
+            )
+        # 5: cambiar la fecha no puede sacarlo del mes de su rubro.
+        check_same_month(item, spent_on)
+        return {}
+
+    if "category_id" in changes:
+        usable_category(db, expense.space_id, changes["category_id"])
+    return {}
+
+
 @router.patch("/{expense_id}")
 def update_expense(
     data: ExpensePatch,
@@ -129,12 +228,11 @@ def update_expense(
     # `exclude_unset`: solo lo que llegó en el cuerpo (`model_fields_set`).
     # Un `"description": null` sí está y la quita (decisión 8).
     changes = data.model_dump(exclude_unset=True)
-    if "category_id" in changes:
-        usable_category(db, expense.space_id, changes["category_id"])
+    changes.update(item_changes(db, expense, changes))
 
     for field, value in changes.items():
         setattr(expense, field, value)
-    db.commit()
+    commit_or_missing_item(db)
     return ExpenseOut.model_validate(expense)
 
 

@@ -133,7 +133,7 @@ rechazando una eliminada con su propio mensaje.
 - Hecho cuando: los tests pasan.
 - RF: RF-10 a RF-12.
 
-## [ ] T7 — Gastos con rubro
+## [x] T7 — Gastos con rubro
 `ExpenseIn`, `ExpensePatch` y `ExpenseOut` con `budget_item_id`, y las
 rutas de gastos con las reglas de "Editar un gasto" del plan.
 

@@ -260,17 +260,32 @@ SpentOn = Annotated[
 Description = Annotated[str | None, AfterValidator(clean_description)]
 
 
+# Spec 008, RF-17: un gasto planeado lleva su rubro; uno no planeado, su
+# categoría. Nunca los dos ni ninguno.
+EXACTLY_ONE_MESSAGE = (
+    "Indica el rubro del gasto o, si no estaba planeado, su categoría, pero no los dos."
+)
+
+
 class ExpenseIn(BaseModel):
     # Sin `space_id` ni `created_by`: salen de la ruta y de la sesión, y si
     # llegan en el cuerpo se ignoran (RF-14).
     amount: Amount
     payment_type: PaymentType
-    # Estricto: `true` o `"1"` no son el id de una categoría. Que exista en
-    # el espacio lo comprueba la ruta (RF-5).
-    category_id: StrictInt
+    # Estrictos: `true` o `"1"` no son un id. Que el rubro o la categoría
+    # existan en el espacio lo comprueba la ruta (RF-5; RF-18 de la 008).
+    # Con rubro, la categoría sale del rubro (decisión 13 de la 008).
+    budget_item_id: StrictInt | None = None
+    category_id: StrictInt | None = None
     # `dates.today()` al validar, no al definir la clase (RF-2).
     spent_on: SpentOn = Field(default_factory=lambda: dates.today())
     description: Description = None
+
+    @model_validator(mode="after")
+    def item_or_category(self) -> "ExpenseIn":
+        if (self.budget_item_id is None) == (self.category_id is None):
+            raise PydanticCustomError("item_or_category", EXACTLY_ONE_MESSAGE)
+        return self
 
 
 class ExpensePatch(BaseModel):
@@ -281,6 +296,9 @@ class ExpensePatch(BaseModel):
     spent_on: SpentOn | None = None
     # `null` aquí sí vale: quita la descripción (decisión 8).
     description: Description = None
+    # `null` también vale: quita el rubro y el gasto queda no planeado (RF-21
+    # de la 008). Las reglas que cruzan campos las aplica la ruta.
+    budget_item_id: StrictInt | None = None
 
     @field_validator("amount", "payment_type", "category_id", "spent_on", mode="before")
     @classmethod
@@ -309,6 +327,8 @@ class ExpenseOut(BaseModel):
     description: str | None
     created_by: int
     created_at: datetime
+    # Nulo si no estaba planeado (RF-20 de la 008).
+    budget_item_id: int | None
 
 
 # --- Presupuesto y resumen (spec 004) ---

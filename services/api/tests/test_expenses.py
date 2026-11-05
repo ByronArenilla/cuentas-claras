@@ -235,6 +235,8 @@ def test_expense_out_has_exactly_the_planned_fields() -> None:
         "description",
         "created_by",
         "created_at",
+        # Spec 008: el rubro del gasto, nulo si no estaba planeado (RF-20).
+        "budget_item_id",
     }
 
 
@@ -1004,3 +1006,255 @@ def test_an_expense_in_a_deleted_category_can_still_be_edited(
     assert response.status_code == 200
     assert response.json()["amount"] == 25000
     assert response.json()["category_id"] == mascotas
+
+
+# --- Gastos con rubro (spec 008, RF-17 a RF-22) ---
+
+EXACTLY_ONE = (
+    "Indica el rubro del gasto o, si no estaba planeado, su categoría, pero no los dos."
+)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"amount": 20000, "payment_type": "debit"},
+        {
+            "amount": 20000,
+            "payment_type": "debit",
+            "category_id": 1,
+            "budget_item_id": 2,
+        },
+    ],
+)
+def test_expense_in_needs_exactly_a_budget_item_or_a_category(body: dict) -> None:
+    # RF-17, criterio 4.
+    with pytest.raises(ValidationError) as exc:
+        ExpenseIn.model_validate(body)
+    assert EXACTLY_ONE in error_message(exc)
+
+
+@pytest.mark.parametrize("budget_item_id", ["2", True, 2.0])
+def test_budget_item_id_must_be_an_integer(budget_item_id: object) -> None:
+    with pytest.raises(ValidationError):
+        ExpenseIn.model_validate(
+            {"amount": 1, "payment_type": "debit", "budget_item_id": budget_item_id}
+        )
+
+
+def test_a_patch_accepts_null_to_remove_the_budget_item() -> None:
+    patch = ExpensePatch.model_validate({"budget_item_id": None})
+    assert patch.model_dump(exclude_unset=True) == {"budget_item_id": None}
+
+
+class Plan:
+    """Espacio personal de Ana con rubros de octubre y septiembre de 2026."""
+
+    def __init__(self, client: TestClient, headers: dict[str, str]) -> None:
+        self.client, self.headers = client, headers
+        self.space_id = personal_space(client, headers)
+        listed = client.get(f"/spaces/{self.space_id}/categories", headers=headers)
+        self.categories = {c["name"]: c["id"] for c in listed.json()}
+        self.mercado = self.item("Mercado", "Comida", "2026-10")
+        self.arriendo = self.item("Arriendo", "Hogar", "2026-10")
+        self.mercado_septiembre = self.item("Mercado", "Comida", "2026-09")
+
+    def item(self, name: str, category: str, period: str) -> dict:
+        body = {
+            "period": period,
+            "name": name,
+            "category_id": self.categories[category],
+            "amount": 800000,
+        }
+        return self.client.post(
+            f"/spaces/{self.space_id}/budget-items", json=body, headers=self.headers
+        ).json()
+
+    def register(self, **fields: object):
+        body = {"amount": 20000, "payment_type": "debit", **fields}
+        return self.client.post(
+            f"/spaces/{self.space_id}/expenses", json=body, headers=self.headers
+        )
+
+    def patch(self, expense_id: int, body: dict):
+        return self.client.patch(
+            f"/spaces/{self.space_id}/expenses/{expense_id}",
+            json=body,
+            headers=self.headers,
+        )
+
+
+@pytest.fixture
+def plan(client: TestClient, login: Login, fixed_clock: None) -> Plan:
+    return Plan(client, login("ana@example.com"))
+
+
+def test_a_planned_expense_takes_the_category_of_its_item(plan: Plan) -> None:
+    # RF-20, decisión 13: se escribe el rubro y la categoría sale de él.
+    response = plan.register(budget_item_id=plan.mercado["id"], spent_on="2026-10-15")
+
+    assert response.status_code == 201
+    assert response.json()["budget_item_id"] == plan.mercado["id"]
+    assert response.json()["category_id"] == plan.categories["Comida"]
+
+
+def test_an_unplanned_expense_has_no_item(plan: Plan) -> None:
+    response = plan.register(category_id=plan.categories["Salud"])
+
+    assert response.status_code == 201
+    assert response.json()["budget_item_id"] is None
+    assert response.json()["category_id"] == plan.categories["Salud"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{}, {"category_id": 1, "budget_item_id": 1}],
+)
+def test_both_or_neither_is_rejected(plan: Plan, engine: Engine, fields: dict) -> None:
+    response = plan.register(**fields)
+
+    assert response.status_code == 422
+    assert EXACTLY_ONE in response.text
+    assert count_expenses(engine) == 0
+
+
+def test_an_item_of_another_month_is_rejected(plan: Plan, engine: Engine) -> None:
+    # RF-19, criterio 4: un gasto del 3 de octubre no va a un rubro de
+    # septiembre.
+    response = plan.register(
+        budget_item_id=plan.mercado_septiembre["id"], spent_on="2026-10-03"
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "El rubro «Mercado» es de 2026-09 y el gasto es de 2026-10. Elige un rubro "
+        "de 2026-10 o regístralo como no planeado."
+    )
+    assert count_expenses(engine) == 0
+
+
+def test_an_item_of_another_space_is_rejected(
+    client: TestClient, login: Login, plan: Plan, engine: Engine
+) -> None:
+    # RF-18: aunque quien llama sea miembro de los dos, igual que inexistente.
+    casa = client.post("/spaces", json={"name": "Casa"}, headers=plan.headers).json()
+    hogar_casa = client.get(
+        f"/spaces/{casa['id']}/categories", headers=plan.headers
+    ).json()[0]["id"]
+    foreign = client.post(
+        f"/spaces/{casa['id']}/budget-items",
+        json={"period": "2026-10", "name": "X", "category_id": hogar_casa, "amount": 1},
+        headers=plan.headers,
+    ).json()["id"]
+
+    for item_id in (foreign, 999_999):
+        response = plan.register(budget_item_id=item_id)
+        assert response.status_code == 422
+        assert response.json()["detail"] == "El rubro no existe en este espacio."
+    assert count_expenses(engine) == 0
+
+
+def test_an_item_whose_category_was_deleted_still_takes_expenses(
+    plan: Plan,
+) -> None:
+    # RF-42, decisión 17.
+    plan.client.delete(
+        f"/spaces/{plan.space_id}/categories/{plan.categories['Comida']}",
+        headers=plan.headers,
+    )
+
+    response = plan.register(budget_item_id=plan.mercado["id"])
+
+    assert response.status_code == 201
+    assert response.json()["category_id"] == plan.categories["Comida"]
+
+
+def test_moving_a_planned_expense_to_another_month_is_rejected(plan: Plan) -> None:
+    # RF-19, criterio 4.
+    expense = plan.register(
+        budget_item_id=plan.mercado["id"], spent_on="2026-10-15"
+    ).json()
+
+    response = plan.patch(expense["id"], {"spent_on": "2026-09-30"})
+
+    assert response.status_code == 422
+    assert "es de 2026-10 y el gasto es de 2026-09" in response.json()["detail"]
+
+
+def test_moving_month_and_item_together_is_accepted(plan: Plan) -> None:
+    expense = plan.register(
+        budget_item_id=plan.mercado["id"], spent_on="2026-10-15"
+    ).json()
+
+    response = plan.patch(
+        expense["id"],
+        {"spent_on": "2026-09-30", "budget_item_id": plan.mercado_septiembre["id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["budget_item_id"] == plan.mercado_septiembre["id"]
+
+
+def test_linking_to_another_item_changes_the_category(plan: Plan) -> None:
+    # RF-21.
+    expense = plan.register(category_id=plan.categories["Salud"]).json()
+
+    response = plan.patch(expense["id"], {"budget_item_id": plan.arriendo["id"]})
+
+    assert response.status_code == 200
+    assert response.json()["budget_item_id"] == plan.arriendo["id"]
+    assert response.json()["category_id"] == plan.categories["Hogar"]
+
+
+def test_removing_the_item_keeps_or_changes_the_category(plan: Plan) -> None:
+    # RF-21: sin categoría, queda la que tenía; con categoría, la enviada.
+    kept = plan.register(budget_item_id=plan.mercado["id"]).json()
+    moved = plan.register(budget_item_id=plan.mercado["id"]).json()
+
+    kept_response = plan.patch(kept["id"], {"budget_item_id": None})
+    moved_response = plan.patch(
+        moved["id"], {"budget_item_id": None, "category_id": plan.categories["Ocio"]}
+    )
+
+    assert kept_response.json()["budget_item_id"] is None
+    assert kept_response.json()["category_id"] == plan.categories["Comida"]
+    assert moved_response.json()["budget_item_id"] is None
+    assert moved_response.json()["category_id"] == plan.categories["Ocio"]
+
+
+def test_the_category_of_a_planned_expense_cannot_change_alone(plan: Plan) -> None:
+    # RF-21.
+    expense = plan.register(budget_item_id=plan.mercado["id"]).json()
+
+    response = plan.patch(expense["id"], {"category_id": plan.categories["Ocio"]})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "El gasto está en el rubro «Mercado» y usa su categoría. Para cambiarla, "
+        "quítale el rubro."
+    )
+
+
+def test_a_patch_with_an_item_and_a_category_is_rejected(plan: Plan) -> None:
+    expense = plan.register(category_id=plan.categories["Salud"]).json()
+
+    response = plan.patch(
+        expense["id"],
+        {"budget_item_id": plan.mercado["id"], "category_id": plan.categories["Ocio"]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == EXACTLY_ONE
+
+
+def test_listing_and_recent_bring_the_item(plan: Plan) -> None:
+    # RF-20, RF-22.
+    expense = plan.register(budget_item_id=plan.mercado["id"]).json()
+    base = f"/spaces/{plan.space_id}/expenses"
+
+    listed = plan.client.get(f"{base}?period=2026-10", headers=plan.headers).json()
+    recent = plan.client.get(f"{base}/recent", headers=plan.headers).json()
+
+    assert listed == [expense]
+    assert recent == [expense]
+    assert expense["budget_item_id"] == plan.mercado["id"]
