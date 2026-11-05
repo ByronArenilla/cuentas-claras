@@ -30,7 +30,7 @@
   arranca sobre una **copia** de la base local y la deja en `0001`.
 - RF: RF-31, RF-32, RF-34, RF-37; base de RF-36.
 
-## [ ] T2 — Modelos de rubros, ingresos y categorías eliminadas (expandir)
+## [x] T2 — Modelos de rubros, ingresos y categorías eliminadas (expandir)
 `BudgetItem`, `Income`, `Expense.budget_item_id` y `Category.deleted_at` en
 `models.py`, como los describe el plan, y la migración
 `0002_budget_items_and_incomes`.

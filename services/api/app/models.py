@@ -1,5 +1,5 @@
 """Tablas de usuarios, espacios, membresías, invitaciones, sesiones, categorías,
-gastos y presupuestos."""
+gastos, presupuestos, rubros e ingresos."""
 
 import unicodedata
 from datetime import UTC, date, datetime
@@ -145,6 +145,9 @@ class Category(Base):
     # porque `casefold` puede alargar el texto ("ß" pasa a ser "ss").
     name_key: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    # Nula si está activa. Eliminar una categoría la archiva en lugar de
+    # borrarla: sus rubros y gastos la conservan (spec 008, decisión 14).
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     @validates("name")
     def _fill_name_key(self, _key: str, name: str) -> str:
@@ -165,6 +168,9 @@ class Expense(Base):
         # El listado filtra por espacio y periodo (RF-9), igual que el
         # resumen de la spec 004.
         Index("ix_expenses_space_id_spent_on", "space_id", "spent_on"),
+        # Para cambiar o soltar los gastos de un rubro (RF-7, RF-8 de la
+        # 008). PostgreSQL no indexa solas las claves foráneas.
+        Index("ix_expenses_budget_item_id", "budget_item_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -175,6 +181,12 @@ class Expense(Base):
     # categorías (principio 8), y `RESTRICT`, que comprueba fila a fila,
     # podría frenar el borrado del espacio.
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    # Rubro del gasto; nulo si no estaba planeado (spec 008). Si tiene rubro,
+    # `category_id` es la del rubro: la API mantiene las dos de acuerdo
+    # (decisión 5). Sin `ondelete`, por la misma razón que `category_id`.
+    budget_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("budget_items.id", name="fk_expenses_budget_item_id")
+    )
     # Salir del espacio solo borra la membresía: el gasto conserva su autor
     # (RF-20).
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -220,3 +232,63 @@ class Budget(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utc_now, onupdate=utc_now
     )
+
+
+class BudgetItem(Base):
+    """Rubro: una línea del plan de un mes, con nombre libre, categoría y
+    monto planeado (spec 008). Cada mes tiene los suyos (decisión 1)."""
+
+    __tablename__ = "budget_items"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_budget_items_amount_positive"),
+        # Dos rubros del mismo mes no se llaman igual, aunque lleguen dos
+        # peticiones o dos copias a la vez (RF-3, RF-14). Su índice, que
+        # empieza por espacio y mes, sirve también para leer el plan del mes.
+        UniqueConstraint(
+            "space_id", "period_start", "name_key", name="uq_budget_items_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    # Siempre el día 1 del periodo; solo lo escribe la API y no cambia
+    # (decisión 12).
+    period_start: Mapped[date] = mapped_column(Date)
+    name: Mapped[str] = mapped_column(String(50))
+    # Misma comparación que las categorías (decisión 22, ADR 0006).
+    name_key: Mapped[str] = mapped_column(String)
+    # Sin `ondelete`, por la misma razón que en `Expense` (plan 003).
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    amount: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+
+    @validates("name")
+    def _fill_name_key(self, _key: str, name: str) -> str:
+        self.name_key = category_key(name)
+        return name
+
+
+class Income(Base):
+    """Ingreso que el espacio espera recibir en un mes (spec 008, decisión 3).
+    Es parte del plan: nombre y monto, sin fecha."""
+
+    __tablename__ = "incomes"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_incomes_amount_positive"),
+        UniqueConstraint(
+            "space_id", "period_start", "name_key", name="uq_incomes_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    period_start: Mapped[date] = mapped_column(Date)
+    name: Mapped[str] = mapped_column(String(50))
+    name_key: Mapped[str] = mapped_column(String)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+
+    @validates("name")
+    def _fill_name_key(self, _key: str, name: str) -> str:
+        self.name_key = category_key(name)
+        return name
