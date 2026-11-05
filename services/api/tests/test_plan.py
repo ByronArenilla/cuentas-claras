@@ -157,3 +157,204 @@ def test_the_budget_route_of_the_004_is_gone(ana: Space) -> None:
     )
 
     assert response.status_code == 404
+
+
+# --- Copiar el plan (RF-13 a RF-16) ---
+
+
+def copy(space: Space, period: str | None = None, headers: dict | None = None):
+    body = {"period": period} if period else {}
+    return space.client.post(
+        f"/spaces/{space.id}/plan/copy",
+        json=body,
+        headers=space.headers if headers is None else headers,
+    )
+
+
+def plan_of(space: Space, period: str) -> dict:
+    """Rubros e ingresos del mes, sin ids, tal como los muestra el resumen."""
+    summary = space.summary(period).json()
+    return {
+        "incomes": [(row["name"], row["amount"]) for row in summary["incomes"]],
+        "budget_items": [
+            (row["name"], row["category_id"], row["planned"])
+            for row in summary["budget_items"]
+        ],
+    }
+
+
+@pytest.fixture
+def november(ana: Space) -> dict:
+    """Plan de noviembre de Ana, con un gasto en Mercado."""
+    ana.income("2026-11", "Salario", 5_000_000)
+    ana.income("2026-11", "Bonificación", 300_000)
+    arriendo = ana.item("2026-11", "Arriendo", "Hogar", 1_500_000)
+    mercado = ana.item("2026-11", "Mercado", "Comida", 800_000)
+    return {"arriendo": arriendo, "mercado": mercado}
+
+
+def test_copying_creates_the_same_plan_in_the_next_month(
+    ana: Space, november: dict, engine
+) -> None:
+    # Criterio 3.
+    before = ana.summary("2026-11").json()
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["skipped"] == []
+    assert body["summary"] == ana.summary("2026-12").json()
+    assert plan_of(ana, "2026-12") == plan_of(ana, "2026-11")
+    assert plan_of(ana, "2026-12") == {
+        "incomes": [("Salario", 5_000_000), ("Bonificación", 300_000)],
+        "budget_items": [
+            ("Arriendo", ana.categories["Hogar"], 1_500_000),
+            ("Mercado", ana.categories["Comida"], 800_000),
+        ],
+    }
+    # Son filas nuevas, y noviembre no cambia.
+    new_ids = {row["id"] for row in body["summary"]["budget_items"]}
+    assert new_ids.isdisjoint({november["arriendo"]["id"], november["mercado"]["id"]})
+    assert ana.summary("2026-11").json() == before
+
+
+def test_copying_does_not_touch_the_expenses_of_the_source(ana: Space) -> None:
+    # RF-16: el gasto de octubre sigue en su rubro de octubre, y noviembre
+    # empieza sin gastado.
+    mercado = ana.item("2026-10", "Mercado", "Comida", 800_000)
+    expense = ana.spend(412_000, "2026-10-03", budget_item_id=mercado["id"])
+    before = ana.summary("2026-10").json()
+
+    response = copy(ana, "2026-11")
+    listed = ana.client.get(
+        f"/spaces/{ana.id}/expenses", params={"period": "2026-10"}, headers=ana.headers
+    ).json()
+
+    assert response.status_code == 201
+    assert listed == [expense]
+    assert expense["budget_item_id"] == mercado["id"]
+    assert ana.summary("2026-10").json() == before
+    assert response.json()["summary"]["budget_items"][0]["spent"] == 0
+    assert response.json()["summary"]["total"]["spent"] == 0
+
+
+@pytest.mark.parametrize("what", ["item", "income"])
+def test_a_month_with_any_plan_is_not_copied_over(ana: Space, november: dict, what):
+    # RF-14: ni mezcla ni reemplaza.
+    if what == "item":
+        ana.item("2026-12", "Regalos", "Ocio", 200_000)
+    else:
+        ana.income("2026-12", "Prima", 2_500_000)
+    before = plan_of(ana, "2026-12")
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "2026-12 ya tiene un plan; no se copió nada."
+    assert plan_of(ana, "2026-12") == before
+
+
+def test_copying_twice_is_rejected(ana: Space, november: dict) -> None:
+    copy(ana, "2026-12")
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 409
+    assert len(plan_of(ana, "2026-12")["budget_items"]) == 2
+
+
+def test_an_empty_previous_month_is_rejected(ana: Space, november: dict) -> None:
+    # RF-15: enero se copiaría de diciembre, que está vacío.
+    response = copy(ana, "2027-01")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "2026-12 no tiene un plan para copiar."
+    assert plan_of(ana, "2027-01") == {"incomes": [], "budget_items": []}
+
+
+def test_items_of_deleted_categories_are_skipped_and_reported(
+    ana: Space, november: dict
+) -> None:
+    # RF-13, decisión 15.
+    ana.client.delete(
+        f"/spaces/{ana.id}/categories/{ana.categories['Hogar']}", headers=ana.headers
+    )
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 201
+    assert response.json()["skipped"] == [{"name": "Arriendo", "category": "Hogar"}]
+    assert plan_of(ana, "2026-12")["budget_items"] == [
+        ("Mercado", ana.categories["Comida"], 800_000)
+    ]
+    assert len(plan_of(ana, "2026-12")["incomes"]) == 2
+
+
+def test_only_items_of_deleted_categories_is_nothing_to_copy(ana: Space) -> None:
+    # RF-15: si todo se omite y no hay ingresos, no hay nada que copiar.
+    ana.item("2026-11", "Arriendo", "Hogar", 1_500_000)
+    ana.client.delete(
+        f"/spaces/{ana.id}/categories/{ana.categories['Hogar']}", headers=ana.headers
+    )
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "2026-11 no tiene un plan para copiar."
+    assert plan_of(ana, "2026-12") == {"incomes": [], "budget_items": []}
+
+
+def test_without_period_it_copies_into_the_current_month(ana: Space) -> None:
+    # Criterio 6: el 31 de octubre a las 20:00 en Bogotá copia septiembre a
+    # octubre.
+    ana.income("2026-09", "Salario", 5_000_000)
+
+    response = copy(ana)
+
+    assert response.status_code == 201
+    assert response.json()["summary"]["period"] == "2026-10"
+    assert plan_of(ana, "2026-10")["incomes"] == [("Salario", 5_000_000)]
+
+
+def test_a_copy_that_collides_leaves_nothing_half_done(
+    ana: Space, november: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # RF-14: si otra copia llegó a la vez, la comprobación previa no la ve y
+    # el índice único frena el INSERT. Se simula que la comprobación no vio
+    # nada.
+    from app import plan
+
+    copy(ana, "2026-12")
+    before = plan_of(ana, "2026-12")
+    monkeypatch.setattr(plan, "has_plan", lambda *_args: False)
+
+    response = copy(ana, "2026-12")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "2026-12 ya tiene un plan; no se copió nada."
+    assert plan_of(ana, "2026-12") == before
+
+
+def test_deleting_restoring_and_copying_again(ana: Space, november: dict) -> None:
+    # Criterio 13 de punta a punta: con "Hogar" eliminada su rubro no se copia;
+    # al restaurarla, se copia de nuevo.
+    hogar = ana.categories["Hogar"]
+    ana.client.delete(f"/spaces/{ana.id}/categories/{hogar}", headers=ana.headers)
+    december = copy(ana, "2026-12").json()
+    restored = ana.client.post(
+        f"/spaces/{ana.id}/categories", json={"name": "hogar"}, headers=ana.headers
+    )
+    ana.item("2026-12", "Arriendo", "Hogar", 1_500_000)
+
+    january = copy(ana, "2027-01").json()
+
+    assert december["skipped"] == [{"name": "Arriendo", "category": "Hogar"}]
+    assert restored.json() == {"id": hogar, "name": "Hogar"}
+    assert january["skipped"] == []
+    assert ("Arriendo", hogar, 1_500_000) in plan_of(ana, "2027-01")["budget_items"]
+
+
+def test_copying_without_session_is_rejected(ana: Space, november: dict) -> None:
+    assert copy(ana, "2026-12", headers={}).status_code == 401
+    assert plan_of(ana, "2026-12") == {"incomes": [], "budget_items": []}

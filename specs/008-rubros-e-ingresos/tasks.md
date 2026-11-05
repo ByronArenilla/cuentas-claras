@@ -180,7 +180,7 @@ rutas de gastos con las reglas de "Editar un gasto" del plan.
 - Hecho cuando: los tests pasan.
 - RF: RF-23 a RF-27, RF-40.
 
-## [ ] T9 — Copiar el plan
+## [x] T9 — Copiar el plan
 `app/plan.py` con `copy_previous_plan` y `POST /plan/copy` en
 `app/routers/plan.py`.
 

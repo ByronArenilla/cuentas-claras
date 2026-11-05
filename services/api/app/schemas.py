@@ -526,3 +526,17 @@ class SummaryOut(BaseModel):
     budget_items: list[ItemSummaryOut]
     categories: list[CategorySummaryOut]
     total: TotalSummaryOut
+
+
+class SkippedItemOut(BaseModel):
+    # Rubro que la copia omitió porque su categoría está eliminada
+    # (decisión 15).
+    name: str
+    category: str
+
+
+class PlanCopyOut(BaseModel):
+    # El resumen del mes destino, que es lo que la web muestra después, y los
+    # rubros omitidos (RF-13).
+    summary: SummaryOut
+    skipped: list[SkippedItemOut]
