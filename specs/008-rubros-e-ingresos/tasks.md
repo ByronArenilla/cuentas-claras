@@ -258,7 +258,7 @@ debería hacer falta código nuevo; si algún test falla, se corrige aquí.
   el plan los cita.
 - RF: ninguno; principio 4.
 
-## [ ] T13 — Cierre: README y validación
+## [x] T13 — Cierre: README y validación
 - Comprobar con una **copia** de la base local que `make run-api` la migra
   a `head`, convierte sus presupuestos y conserva sus gastos.
 - `README.md`: sale la sección "Presupuesto y resumen" de la 004; entran

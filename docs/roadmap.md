@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 008-rubros-e-ingresos
+> **Spec activa:** 009-tarjetas-y-cuotas
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -21,7 +21,7 @@ está validada. Marca con [x] las specs terminadas.
   - Sale `services/bot/` y, de la API, las rutas `/telegram/*` y
     `BOT_API_KEY`. Se queda `GET /spaces/{space_id}/expenses/recent`, que
     también usa la web.
-- [ ] 008-rubros-e-ingresos — Rubros con nombre libre y categoría, ingresos del mes y plan copiado del mes anterior.
+- [x] 008-rubros-e-ingresos — Rubros con nombre libre y categoría, ingresos del mes y plan copiado del mes anterior.
   - Cambia el presupuesto por categoría con vigencia de la 004 (ADR 0008) y
     da a cada gasto un rubro o la marca de "no planeado".
   - Se llamaba "partidas"; se cambió a "rubro" en la clarificación
