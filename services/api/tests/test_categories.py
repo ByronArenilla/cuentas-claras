@@ -282,3 +282,156 @@ def test_a_duplicate_caught_by_the_database_gets_the_same_answer(
     # Dos consultas: la previa, que no vio nada, y la de después del rollback.
     assert len(calls) == 2
     assert listed_names(client, ana, space_id) == DEFAULTS
+
+
+# --- Eliminar y restaurar (spec 008, RF-39 a RF-44) ---
+
+
+def delete_category(
+    client: TestClient, headers: dict[str, str], space_id: int, category_id: int
+) -> Response:
+    return client.delete(
+        f"/spaces/{space_id}/categories/{category_id}", headers=headers
+    )
+
+
+def category_id(client: TestClient, headers: dict[str, str], space_id: int, name: str):
+    response = client.get(f"/spaces/{space_id}/categories", headers=headers)
+    [found] = [c["id"] for c in response.json() if c["name"] == name]
+    return found
+
+
+def test_deleting_a_category_hides_it_and_explains_how_to_get_it_back(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # RF-39, decisión 23: la respuesta trae el aviso, y deja de salir en el
+    # listado para los dos miembros.
+    space_id, ana, bea = shared_space
+    mascotas = create_category(client, ana, space_id, "Mascotas").json()["id"]
+
+    response = delete_category(client, ana, space_id, mascotas)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == mascotas
+    assert body["name"] == "Mascotas"
+    assert "«Mascotas»" in body["message"]
+    assert "créala de nuevo con el mismo nombre" in body["message"]
+    assert "no se copiarán" in body["message"]
+    assert listed_names(client, ana, space_id) == DEFAULTS
+    assert listed_names(client, bea, space_id) == DEFAULTS
+
+
+def test_deleting_keeps_the_row_and_its_expenses(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-40: se archiva, no se borra, y el gasto conserva su categoría.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    comida = category_id(client, ana, space_id, "Comida")
+    expense = client.post(
+        f"/spaces/{space_id}/expenses",
+        json={"amount": 20000, "payment_type": "debit", "category_id": comida},
+        headers=ana,
+    ).json()
+
+    delete_category(client, ana, space_id, comida)
+
+    stored = {c.id: c for c in stored_categories(engine, space_id)}
+    assert stored[comida].deleted_at is not None
+    again = client.get(f"/spaces/{space_id}/expenses/{expense['id']}", headers=ana)
+    assert again.json() == expense
+
+
+def test_the_defaults_can_be_deleted(client: TestClient, login: Login) -> None:
+    # Decisión 19.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+
+    for name in DEFAULTS:
+        response = delete_category(
+            client, ana, space_id, category_id(client, ana, space_id, name)
+        )
+        assert response.status_code == 200
+    assert listed_names(client, ana, space_id) == []
+
+
+def test_deleting_a_missing_foreign_or_deleted_category_is_404(
+    client: TestClient, login: Login
+) -> None:
+    # RF-44 y criterio 14.
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    space_id = personal_space(client, ana)
+    bea_space = personal_space(client, bea)
+    foreign = category_id(client, bea, bea_space, "Comida")
+    comida = category_id(client, ana, space_id, "Comida")
+    delete_category(client, ana, space_id, comida)
+
+    for target in (comida, foreign, 999_999):
+        response = delete_category(client, ana, space_id, target)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Categoría no encontrada."
+    assert listed_names(client, bea, bea_space) == DEFAULTS
+
+
+def test_deleting_without_a_session_is_rejected(
+    client: TestClient, login: Login
+) -> None:
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    comida = category_id(client, ana, space_id, "Comida")
+
+    assert delete_category(client, {}, space_id, comida).status_code == 401
+    assert listed_names(client, ana, space_id) == DEFAULTS
+
+
+@pytest.mark.parametrize("name", ["mascotas", "Mascotas", " MASCOTAS "])
+def test_creating_a_deleted_name_restores_it_with_its_original_name(
+    client: TestClient, login: Login, name: str
+) -> None:
+    # RF-43, decisiones 16 y 21: mismo id, nombre original y respuesta 200.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    mascotas = create_category(client, ana, space_id, "Mascotas").json()["id"]
+    delete_category(client, ana, space_id, mascotas)
+
+    response = create_category(client, ana, space_id, name)
+
+    assert response.status_code == 200
+    assert response.json() == {"id": mascotas, "name": "Mascotas"}
+    assert listed_names(client, ana, space_id) == [*DEFAULTS, "Mascotas"]
+
+
+@pytest.mark.parametrize("name", ["accion", "Accion", "ACCIÓN", "acción"])
+def test_names_compare_without_case_or_accents_when_restoring(
+    client: TestClient, login: Login, name: str
+) -> None:
+    # Criterio 15, decisión 22.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    accion = create_category(client, ana, space_id, "Acción").json()["id"]
+    delete_category(client, ana, space_id, accion)
+
+    response = create_category(client, ana, space_id, name)
+
+    assert response.json() == {"id": accion, "name": "Acción"}
+
+
+def test_an_active_name_still_clashes_and_enye_still_counts(
+    client: TestClient, login: Login
+) -> None:
+    # Criterio 15: "ahorro" choca con "Ahorro" activa; "Año" y "Ano" conviven
+    # aunque una de las dos esté eliminada.
+    ana = login("ana@example.com")
+    space_id = personal_space(client, ana)
+    create_category(client, ana, space_id, "Ahorro")
+    ano = create_category(client, ana, space_id, "Año").json()["id"]
+    delete_category(client, ana, space_id, ano)
+
+    clash = create_category(client, ana, space_id, "ahorro")
+    other = create_category(client, ana, space_id, "Ano")
+
+    assert clash.status_code == 409
+    assert "«Ahorro»" in clash.json()["detail"]
+    assert other.status_code == 201
+    assert other.json()["id"] != ano

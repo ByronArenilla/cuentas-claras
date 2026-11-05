@@ -44,3 +44,14 @@ def period_bounds(period: str) -> tuple[date, date]:
     start = date(year, month, 1)
     end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     return start, end
+
+
+def previous_period(period: str) -> str:
+    """El periodo anterior: de `2026-01` sale `2025-12` (spec 008, RF-13).
+
+    Lanza `ValueError` si `period` no es un mes `YYYY-MM`.
+    """
+    start, _ = period_bounds(period)
+    if start.month == 1:
+        return period_of(date(start.year - 1, 12, 1))
+    return period_of(date(start.year, start.month - 1, 1))

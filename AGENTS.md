@@ -24,19 +24,28 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
 ## Dominio
 - **Usuario** (`user`): persona que se autentica en la app.
 - **Espacio** (`space`): ámbito que contiene el presupuesto y sus datos.
-  Gasto, categoría y presupuesto pertenecen siempre a un espacio.
+  Gasto, categoría, rubro e ingreso pertenecen siempre a un espacio.
 - **Membresía** (`membership`): vincula un usuario con un espacio. Un
   usuario puede pertenecer a varios espacios; hoy todos los miembros de un
   espacio tienen los mismos permisos.
-- **Gasto** (`expense`): dinero que salió. Tiene monto, tipo de pago,
-  categoría, fecha, descripción opcional y el usuario que lo registró.
+- **Gasto** (`expense`): dinero que salió. Tiene monto, tipo de pago, fecha,
+  descripción opcional y el usuario que lo registró. Si estaba planeado, va
+  en un rubro de su mes y usa su categoría; si no, lleva su propia
+  categoría.
 - **Tipo de pago** (`payment_type`): `credit` o `debit`.
-- **Categoría** (`category`): agrupa gastos (hogar, transporte, comida...).
-- **Presupuesto** (`budget`): monto máximo por categoría para un periodo.
+- **Categoría** (`category`): agrupa rubros y gastos (hogar, transporte,
+  comida...). Eliminarla la archiva: lo que ya la tenía la conserva, y
+  crearla de nuevo la restaura.
+- **Rubro** (`budget_item`): línea del plan de un mes: nombre libre,
+  categoría y monto planeado.
+- **Ingreso** (`income`): dinero que se espera recibir en un mes: nombre y
+  monto.
+- **Plan** (`plan`): rubros e ingresos de un periodo; se copia del mes
+  anterior con una acción explícita.
 - **Periodo** (`period`): un mes calendario en la zona horaria configurada,
   con formato `YYYY-MM`.
-- **Resumen** (`summary`): gastado vs. presupuestado por categoría en un
-  periodo, dentro de un espacio.
+- **Resumen** (`summary`): ingresos, planeado vs. gastado por rubro y por
+  categoría, sin asignar y balance de un periodo, dentro de un espacio.
 
 Las reglas concretas de cada concepto están en las specs. Si una regla no
 está escrita, pregunta en lugar de suponer.

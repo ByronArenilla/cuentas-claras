@@ -6,9 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Budget,
+    BudgetItem,
     Category,
     Expense,
+    Income,
     Invitation,
     Membership,
     Space,
@@ -276,7 +277,7 @@ def test_deleting_space_cascades_to_its_expenses_and_categories(
     assert session.scalars(select(Category.space_id)).all() == [kept.id]
 
 
-# --- Presupuestos (spec 004) ---
+# --- Categorías (helper compartido) ---
 
 
 def make_category(session: Session, space: Space, name: str = "Comida") -> Category:
@@ -286,87 +287,171 @@ def make_category(session: Session, space: Space, name: str = "Comida") -> Categ
     return category
 
 
-def make_budget(session: Session, category: Category, **fields: object) -> Budget:
-    """Presupuesto de `category` desde octubre de 2026, salvo que se indique otro."""
+# --- Rubros, ingresos y categorías eliminadas (spec 008) ---
+
+
+def make_item(session: Session, category: Category, **fields: object) -> BudgetItem:
+    """Rubro "Mercado" de `category` en noviembre de 2026, salvo otro indicado."""
     values: dict[str, object] = {
         "space_id": category.space_id,
         "category_id": category.id,
-        "starts_on": date(2026, 10, 1),
-        "amount": 400_000,
+        "period_start": date(2026, 11, 1),
+        "name": "Mercado",
+        "amount": 800_000,
         **fields,
     }
-    budget = Budget(**values)
-    session.add(budget)
+    item = BudgetItem(**values)
+    session.add(item)
     session.flush()
-    return budget
+    return item
 
 
-def test_budget_is_saved_and_read_back(session: Session) -> None:
-    budget = make_budget(session, make_category(session, make_space(session)))
-    session.expire_all()
+def make_income(session: Session, space: Space, **fields: object) -> Income:
+    """Ingreso "Salario" del espacio en noviembre de 2026, salvo otro indicado."""
+    values: dict[str, object] = {
+        "space_id": space.id,
+        "period_start": date(2026, 11, 1),
+        "name": "Salario",
+        "amount": 5_000_000,
+        **fields,
+    }
+    income = Income(**values)
+    session.add(income)
+    session.flush()
+    return income
 
-    saved = session.get(Budget, budget.id)
-    assert saved.amount == 400_000
-    assert saved.starts_on == date(2026, 10, 1)
-    assert type(saved.starts_on) is date
-    assert saved.updated_at.tzinfo is UTC
 
-
-@pytest.mark.parametrize("amount", [None, 1_000_000_000_000])
-def test_budget_amount_can_be_null_or_one_trillion(
-    session: Session, amount: int | None
-) -> None:
-    # Nulo quita el presupuesto desde ese periodo (RF-6, decisión 4); el tope
-    # es el mismo que el de un gasto (RF-7).
+def test_budget_item_is_saved_and_read_back(session: Session) -> None:
     category = make_category(session, make_space(session))
-    budget = make_budget(session, category, amount=amount)
+    item = make_item(session, category, name="Acción de gracias")
     session.expire_all()
 
-    assert session.get(Budget, budget.id).amount == amount
+    saved = session.get(BudgetItem, item.id)
+    assert saved.period_start == date(2026, 11, 1)
+    assert type(saved.period_start) is date
+    assert saved.name == "Acción de gracias"
+    assert saved.name_key == category_key("Acción de gracias")
+    assert saved.category_id == category.id
+    assert saved.amount == 800_000
+    assert saved.created_at.tzinfo is UTC
+
+
+def test_income_is_saved_and_read_back(session: Session) -> None:
+    income = make_income(session, make_space(session), name="Bonificación")
+    session.expire_all()
+
+    saved = session.get(Income, income.id)
+    assert saved.period_start == date(2026, 11, 1)
+    assert saved.name == "Bonificación"
+    assert saved.name_key == "bonificacion"
+    assert saved.amount == 5_000_000
+    assert saved.created_at.tzinfo is UTC
 
 
 @pytest.mark.parametrize("amount", [0, -1])
-def test_database_rejects_budget_not_greater_than_zero(
+def test_database_rejects_item_or_income_not_greater_than_zero(
     session: Session, amount: int
 ) -> None:
-    # RF-7: no existe el presupuesto cero; última defensa tras la API.
-    category = make_category(session, make_space(session))
+    # RF-4: última defensa tras la validación de la API.
+    space = make_space(session)
+    with pytest.raises(IntegrityError):
+        make_item(session, make_category(session, space), amount=amount)
+    session.rollback()
 
     with pytest.raises(IntegrityError):
-        make_budget(session, category, amount=amount)
+        make_income(session, make_space(session), amount=amount)
 
 
-def test_same_category_and_period_cannot_have_two_budgets(session: Session) -> None:
-    # RF-5: el índice único lo frena aunque lleguen dos peticiones a la vez.
-    category = make_category(session, make_space(session))
-    make_budget(session, category)
-
-    with pytest.raises(IntegrityError):
-        make_budget(session, category, amount=500_000)
-
-
-def test_same_period_is_allowed_in_another_category_or_space(
+def test_equivalent_item_names_clash_in_the_same_space_and_month(
     session: Session,
 ) -> None:
+    # RF-3, decisión 22: "accion" choca con "Acción" en el mismo mes.
+    category = make_category(session, make_space(session))
+    make_item(session, category, name="Acción")
+
+    with pytest.raises(IntegrityError):
+        make_item(session, category, name="accion")
+
+
+def test_equivalent_income_names_clash_in_the_same_space_and_month(
+    session: Session,
+) -> None:
+    space = make_space(session)
+    make_income(session, space, name="Salario")
+
+    with pytest.raises(IntegrityError):
+        make_income(session, space, name="SALARIO")
+
+
+def test_same_names_are_allowed_in_another_month_or_space(session: Session) -> None:
     casa, viajes = make_space(session, "Casa"), make_space(session, "Viajes")
-    make_budget(session, make_category(session, casa, "Comida"))
-    make_budget(session, make_category(session, casa, "Ocio"))
-    make_budget(session, make_category(session, viajes, "Comida"))
+    comida_casa = make_category(session, casa)
+    make_item(session, comida_casa)
+    make_item(session, comida_casa, period_start=date(2026, 12, 1))
+    make_item(session, make_category(session, viajes))
+    make_income(session, casa)
+    make_income(session, casa, period_start=date(2026, 12, 1))
+    make_income(session, viajes)
 
-    assert len(session.scalars(select(Budget)).all()) == 3
+    assert len(session.scalars(select(BudgetItem)).all()) == 3
+    assert len(session.scalars(select(Income)).all()) == 3
 
 
-def test_deleting_space_cascades_to_its_budgets(session: Session) -> None:
-    # RF-20. Con categorías, gastos y presupuestos a la vez: la cascada los
-    # quita en la misma sentencia y ninguna clave foránea choca.
+def test_expense_can_have_a_budget_item_or_none(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    unplanned = make_expense(session, space, user)
+    item = make_item(session, session.get(Category, unplanned.category_id))
+    # Directo y no con `make_expense`, que crearía otra categoría "Comida N"
+    # con el mismo nombre en el mismo espacio.
+    planned = Expense(
+        space_id=space.id,
+        category_id=item.category_id,
+        budget_item_id=item.id,
+        created_by=user.id,
+        amount=412_000,
+        payment_type="debit",
+        spent_on=date(2026, 11, 3),
+    )
+    session.add(planned)
+    session.flush()
+    session.expire_all()
+
+    assert session.get(Expense, unplanned.id).budget_item_id is None
+    assert session.get(Expense, planned.id).budget_item_id == item.id
+
+
+def test_expense_with_a_missing_budget_item_is_rejected(session: Session) -> None:
+    with pytest.raises(IntegrityError):
+        make_expense(
+            session, make_space(session), make_user(session), budget_item_id=999
+        )
+
+
+def test_categories_start_not_deleted(session: Session) -> None:
+    category = make_category(session, make_space(session))
+    session.expire_all()
+
+    assert session.get(Category, category.id).deleted_at is None
+
+
+def test_deleting_space_cascades_to_items_incomes_and_linked_expenses(
+    session: Session,
+) -> None:
+    # RF-30. Con gastos ligados a rubros: la cascada quita gastos, rubros,
+    # ingresos y categorías en la misma sentencia y ninguna clave foránea
+    # sin `ON DELETE` choca (plan 008).
     user = make_user(session)
     doomed, kept = make_space(session, "Casa"), make_space(session, "Viajes")
-    make_expense(session, doomed, user)
-    make_budget(session, make_category(session, doomed))
-    kept_budget = make_budget(session, make_category(session, kept))
+    for space in (doomed, kept):
+        item = make_item(session, make_category(session, space))
+        make_expense(
+            session, space, user, category_id=item.category_id, budget_item_id=item.id
+        )
+        make_income(session, space)
 
     session.execute(delete(Space).where(Space.id == doomed.id))
     session.flush()
 
-    assert session.scalars(select(Budget.id)).all() == [kept_budget.id]
-    assert session.scalars(select(Expense.space_id)).all() == []
+    assert session.scalars(select(BudgetItem.space_id)).all() == [kept.id]
+    assert session.scalars(select(Income.space_id)).all() == [kept.id]
+    assert set(session.scalars(select(Expense.space_id)).all()) == {kept.id}

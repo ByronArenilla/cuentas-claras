@@ -18,15 +18,21 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import Engine  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-from app.db import build_engine, create_all, get_db  # noqa: E402
+from app.db import build_engine, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import Base  # noqa: E402
 
 
 @pytest.fixture
 def engine() -> Iterator[Engine]:
-    """Base de datos SQLite en memoria, nueva y vacía para cada test."""
+    """Base de datos SQLite en memoria, nueva y vacía para cada test.
+
+    Se crea desde los modelos y no con las migraciones, que harían mucho más
+    lentos los tests. `test_migrations.py` comprueba que los dos caminos dan
+    el mismo esquema (plan 008).
+    """
     engine = build_engine("sqlite://")
-    create_all(engine)
+    Base.metadata.create_all(engine)
     yield engine
     engine.dispose()
 

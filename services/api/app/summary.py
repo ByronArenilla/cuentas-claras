@@ -1,7 +1,7 @@
-"""Presupuesto vigente y resumen de un periodo (spec 004).
+"""Resumen del plan de un mes (spec 008, RF-23 a RF-25; reemplaza al de la 004).
 
 Funciones sin nada de HTTP, que se prueban con una sesión de base de datos
-(principio 10). Todas las consultas filtran por `space_id` (RF-18).
+(principio 10). Todas las consultas filtran por `space_id` (RF-29).
 """
 
 from datetime import date
@@ -10,35 +10,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import dates
-from app.models import Budget, Category, Expense
-from app.schemas import CategorySummaryOut, SummaryOut, TotalSummaryOut
-
-
-def effective_budgets(db: Session, space_id: int, start: date) -> dict[int, int | None]:
-    """Presupuesto vigente el día `start` de cada categoría con algún cambio
-    desde ese periodo o antes (RF-3, RF-4, RF-6).
-
-    Las filas llegan de la más antigua a la más reciente y cada una pisa a la
-    anterior de su categoría, así que gana la última. Una categoría sin filas
-    no aparece; una cuya última fila es nula aparece con `None`. Las dos
-    significan "sin presupuesto".
-    """
-    rows = db.execute(
-        select(Budget.category_id, Budget.amount)
-        .where(Budget.space_id == space_id, Budget.starts_on <= start)
-        .order_by(Budget.starts_on)
-    )
-    budgets: dict[int, int | None] = {}
-    for category_id, amount in rows:
-        budgets[category_id] = amount
-    return budgets
+from app.models import BudgetItem, Category, Expense, Income
+from app.schemas import (
+    CategorySummaryOut,
+    IncomeSummaryOut,
+    ItemSummaryOut,
+    SummaryOut,
+    TotalSummaryOut,
+)
 
 
 def spent_by_category(
     db: Session, space_id: int, start: date, end: date
 ) -> dict[int, int]:
     """Suma de los gastos de cada categoría con `start <= spent_on < end`,
-    la misma regla que el listado de gastos (RF-12; RF-9 de la 003).
+    planeados o no, con la regla de periodo de la 003 (RF-9 de la 003).
 
     Las categorías sin gastos no aparecen.
     """
@@ -52,56 +38,104 @@ def spent_by_category(
         .group_by(Expense.category_id)
     )
     # `int()`: en PostgreSQL, `SUM` de un `bigint` llega como `Decimal`
-    # (RF-16, principio 6).
+    # (RF-24, principio 6).
     return {category_id: int(total) for category_id, total in rows}
 
 
-def remaining(budget: int | None, spent: int) -> int | None:
-    """Lo que queda, negativo si se excedió; sin presupuesto, nada (RF-13)."""
-    return None if budget is None else budget - spent
+def spent_by_item(db: Session, space_id: int, start: date, end: date) -> dict[int, int]:
+    """Suma de los gastos de cada rubro en el periodo. Los gastos no
+    planeados no cuentan; los rubros sin gastos no aparecen."""
+    rows = db.execute(
+        select(Expense.budget_item_id, func.sum(Expense.amount))
+        .where(
+            Expense.space_id == space_id,
+            Expense.budget_item_id.is_not(None),
+            Expense.spent_on >= start,
+            Expense.spent_on < end,
+        )
+        .group_by(Expense.budget_item_id)
+    )
+    return {item_id: int(total) for item_id, total in rows}
 
 
 def build_summary(db: Session, space_id: int, period: str) -> SummaryOut:
-    """Resumen del periodo: todas las categorías del espacio en orden de
-    creación y los totales (RF-11 a RF-14, decisión 2).
+    """Resumen del periodo: ingresos, rubros, categorías y totales (RF-23).
 
-    `period` debe venir ya validado: un texto inválido lanza `ValueError`.
+    Un mes sin plan sale con listas vacías y montos en 0, sin crear nada
+    (RF-25). `period` debe venir ya validado: un texto inválido lanza
+    `ValueError`.
     """
     start, end = dates.period_bounds(period)
-    budgets = effective_budgets(db, space_id, start)
-    spent = spent_by_category(db, space_id, start, end)
-    categories = db.execute(
-        select(Category.id, Category.name)
-        .where(Category.space_id == space_id)
-        .order_by(Category.id)
-    )
+    spent_items = spent_by_item(db, space_id, start, end)
+    spent_categories = spent_by_category(db, space_id, start, end)
 
-    rows = []
-    for category_id, name in categories:
-        budget = budgets.get(category_id)
-        category_spent = spent.get(category_id, 0)
-        rows.append(
+    incomes = [
+        IncomeSummaryOut(id=income.id, name=income.name, amount=income.amount)
+        for income in db.scalars(
+            select(Income)
+            .where(Income.space_id == space_id, Income.period_start == start)
+            .order_by(Income.id)
+        )
+    ]
+    items = [
+        ItemSummaryOut(
+            id=item.id,
+            name=item.name,
+            category_id=item.category_id,
+            planned=item.amount,
+            spent=spent_items.get(item.id, 0),
+            remaining=item.amount - spent_items.get(item.id, 0),
+        )
+        for item in db.scalars(
+            select(BudgetItem)
+            .where(BudgetItem.space_id == space_id, BudgetItem.period_start == start)
+            .order_by(BudgetItem.id)
+        )
+    ]
+
+    planned_categories: dict[int, int] = {}
+    for item in items:
+        planned_categories[item.category_id] = (
+            planned_categories.get(item.category_id, 0) + item.planned
+        )
+
+    categories = []
+    for category in db.scalars(
+        select(Category).where(Category.space_id == space_id).order_by(Category.id)
+    ):
+        planned = planned_categories.get(category.id, 0)
+        spent = spent_categories.get(category.id, 0)
+        deleted = category.deleted_at is not None
+        # Una eliminada solo sale si tiene rubros o gastos en el mes, así los
+        # totales por categoría cuadran sin llenar la lista (decisión 18).
+        if deleted and category.id not in planned_categories and not spent:
+            continue
+        categories.append(
             CategorySummaryOut(
-                category_id=category_id,
-                name=name,
-                budget=budget,
-                spent=category_spent,
-                remaining=remaining(budget, category_spent),
+                category_id=category.id,
+                name=category.name,
+                planned=planned,
+                spent=spent,
+                deleted=deleted,
             )
         )
 
-    # Solo suman los presupuestos que existen; si no hay ninguno, no hay
-    # total presupuestado. El gastado suma todo, también lo de categorías
-    # sin presupuesto (RF-14).
-    set_budgets = [row.budget for row in rows if row.budget is not None]
-    total_budget = sum(set_budgets) if set_budgets else None
-    total_spent = sum(row.spent for row in rows)
+    income = sum(row.amount for row in incomes)
+    planned = sum(row.planned for row in items)
+    spent_planned = sum(spent_items.values())
+    spent = sum(spent_categories.values())
     return SummaryOut(
         period=period,
-        categories=rows,
+        incomes=incomes,
+        budget_items=items,
+        categories=categories,
         total=TotalSummaryOut(
-            budget=total_budget,
-            spent=total_spent,
-            remaining=remaining(total_budget, total_spent),
+            income=income,
+            planned=planned,
+            spent_planned=spent_planned,
+            spent_unplanned=spent - spent_planned,
+            spent=spent,
+            unassigned=income - planned,
+            balance=income - spent,
         ),
     )

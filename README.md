@@ -35,6 +35,46 @@ http://localhost:8000/docs.
 y `BOT_API_KEY`. Ya no se usan y puedes borrarlas; si se quedan, la API
 arranca igual y las ignora.
 
+## Base de datos y migraciones
+El esquema de la base de datos lo gestiona
+[Alembic](https://alembic.sqlalchemy.org/) con **migraciones**: archivos
+versionados en `services/api/app/migrations/versions/`, cada uno con un
+cambio. La tabla `alembic_version` de la base dice cuál fue el último que se
+aplicó. Por qué así:
+[ADR 0011](docs/adr/0011-migraciones-con-alembic.md).
+
+**Corren solas al arrancar.** `make run-api` aplica las que falten antes de
+atender la primera petición. Si una falla, la API no arranca y el error dice
+cuál fue. Una base creada antes de la spec 008, sin Alembic, se adopta sola:
+la primera migración crea las tablas que le falten y borra las del bot de
+Telegram.
+
+**Antes de arrancar con la 008 por primera vez, copia tu base.** Las
+migraciones no se deshacen, y la 008 convierte el presupuesto de la 004 en
+rubros:
+
+```sh
+cp services/api/budget.db services/api/budget.db.antes-008
+```
+
+Para volver atrás: detén la API, restaura la copia y vuelve a la rama
+anterior.
+
+```sh
+cp services/api/budget.db.antes-008 services/api/budget.db
+```
+
+**Crear una migración nueva** (al cambiar un modelo), desde `services/api`:
+
+```sh
+set -a; . ../../.env; set +a
+.venv/bin/alembic revision --autogenerate --rev-id 0004 -m "que cambia"
+```
+
+Revisa siempre el archivo generado: es un borrador. Si olvidas la
+migración, el test `test_an_empty_database_ends_with_the_schema_of_the_models`
+falla porque el esquema migrado ya no coincide con los modelos.
+
 ## Registrar gastos mientras llega la web
 Hasta la spec 010 no hay app web, así que los gastos se registran con la
 API, de dos formas:
@@ -43,8 +83,8 @@ API, de dos formas:
   `POST /auth/login` para obtener el token y después
   `POST /spaces/{id}/expenses` (ver "Gastos").
 - **Desde http://localhost:8000/docs**: inicia sesión con
-  `POST /auth/login` en "Try it out", copia el `token`, pégalo en el botón
-  **Authorize** y prueba cualquier ruta desde el navegador.
+  `POST /auth/login` en "Try it out", copia el `access_token`, pégalo en el
+  botón **Authorize** y prueba cualquier ruta desde el navegador.
 
 ## Usuarios, espacios e invitaciones
 Los datos pertenecen a un **espacio**, no a una persona. Cada usuario tiene
@@ -110,13 +150,15 @@ miembro, `DELETE /spaces/{id}?confirm=<nombre exacto>` lo borra con todos sus
 datos. Nadie puede quedarse sin ningún espacio.
 
 ## Categorías
-Cada gasto pertenece a una categoría, y cada espacio tiene las suyas.
-Todo espacio nuevo nace con siete predefinidas: Hogar, Comida, Transporte,
-Salud, Servicios, Ocio y Otros. Desde ese momento son del espacio, y
-cualquier miembro puede añadir más.
+Cada gasto y cada rubro pertenecen a una categoría, y cada espacio tiene
+las suyas. Todo espacio nuevo nace con siete predefinidas: Hogar, Comida,
+Transporte, Salud, Servicios, Ocio y Otros. Desde ese momento son del
+espacio, no de un mes: cualquier miembro puede añadir más o eliminarlas, y
+siguen disponibles mes tras mes.
 
-**Listar.** Devuelve las categorías del espacio en orden de creación:
-primero las predefinidas y después las nuevas.
+**Listar.** Devuelve las categorías activas del espacio en orden de
+creación: primero las predefinidas y después las nuevas. Las eliminadas no
+salen.
 
 ```sh
 curl localhost:8000/spaces/1/categories \
@@ -135,17 +177,46 @@ curl -X POST localhost:8000/spaces/1/categories \
 ```
 
 Dos nombres que solo se diferencian en mayúsculas, tildes o diéresis son el
-mismo: si ya existe "Comida", crear "cómida" responde `409` con "Ya existe
-la categoría «Comida» en este espacio.". La ñ sí cuenta, así que "Año" y
-"Ano" pueden convivir. Otro espacio puede tener su propia "Comida". El
-porqué de esta comparación está en el
+mismo: "Ahorro" = "ahorro" y "Acción" = "accion". Si ya existe "Comida",
+crear "cómida" responde `409` con "Ya existe la categoría «Comida» en este
+espacio.". La ñ sí cuenta, así que "Año" y "Ano" pueden convivir. Otro
+espacio puede tener su propia "Comida". La misma comparación vale para los
+nombres de rubros e ingresos. El porqué está en el
 [ADR 0006](docs/adr/0006-clave-normalizada-para-nombres-de-categoria.md).
+
+**Eliminar.** No pide confirmación y no borra nada: la categoría deja de
+salir como opción para rubros y gastos nuevos, pero los que ya la tenían, de
+cualquier mes, la conservan y siguen contando en el resumen. Sus rubros
+dejan de copiarse al planear. La respuesta lo explica:
+
+```sh
+curl -X DELETE localhost:8000/spaces/1/categories/8 \
+  -H 'Authorization: Bearer <token de Ana>'
+# {"id": 8, "name": "Mascotas", "message": "Eliminaste «Mascotas». Sus rubros
+#  y gastos la conservan, pero sus rubros ya no se copiarán al planear. Para
+#  volver a usarla, créala de nuevo con el mismo nombre."}
+```
+
+Usarla después en un rubro o un gasto no planeado responde `422` con "La
+categoría «Mascotas» fue eliminada. Para usarla de nuevo, créala otra vez con
+el mismo nombre.".
+
+**Restaurar.** Crear una categoría con el nombre de una eliminada la
+restaura con su `id`, su nombre original y su historia, y responde `200` en
+lugar de `201`. Así "mascotas" devuelve `{"id": 8, "name": "Mascotas"}`.
 
 ## Gastos
 Un gasto es dinero que ya salió. Tiene monto, tipo de pago (`credit` o
-`debit`), categoría del espacio, fecha y una descripción opcional. Cualquier
-miembro del espacio puede registrar, editar y borrar cualquier gasto, y cada
-gasto recuerda quién lo registró (`created_by`).
+`debit`), fecha, una descripción opcional y, según si estaba planeado o no,
+un rubro o una categoría. Cualquier miembro del espacio puede registrar,
+editar y borrar cualquier gasto, y cada gasto recuerda quién lo registró
+(`created_by`).
+
+- **Planeado** (`budget_item_id`): va en un rubro del plan de su mismo mes
+  (ver "Plan del mes") y su categoría es la del rubro; no se escribe.
+- **No planeado** (`category_id`): no tiene rubro y lleva su categoría.
+
+Se envía uno de los dos, nunca los dos ni ninguno.
 
 - **Monto**: pesos enteros, sin decimales y sin moneda (`20000` son 20.000
   pesos). Debe ser mayor que cero y como máximo un billón. `20000.5` o
@@ -156,18 +227,34 @@ gasto recuerda quién lo registró (`created_by`).
 - **Descripción**: hasta 200 caracteres. Vacía o solo con espacios cuenta
   como ausente.
 
-**Registrar.** Responde `201` con el gasto. La categoría tiene que ser del
-mismo espacio.
+**Registrar.** Responde `201` con el gasto. El rubro o la categoría tienen
+que ser del mismo espacio, y la categoría no puede estar eliminada. Un gasto
+planeado en el rubro "Mercado" (el 1, de noviembre):
 
 ```sh
 curl -X POST localhost:8000/spaces/1/expenses \
   -H 'Authorization: Bearer <token de Ana>' \
   -H 'content-type: application/json' \
-  -d '{"amount": 20000, "payment_type": "debit", "category_id": 2, "description": "Mercado"}'
-# {"id": 1, "amount": 20000, "payment_type": "debit", "category_id": 2,
-#  "spent_on": "2026-11-04", "description": "Mercado", "created_by": 1,
-#  "created_at": "2026-11-04T20:00:05Z"}
+  -d '{"amount": 412000, "payment_type": "debit", "budget_item_id": 1,
+       "spent_on": "2026-11-03", "description": "Mercado de la semana"}'
+# {"id": 1, "amount": 412000, "payment_type": "debit", "category_id": 2,
+#  "spent_on": "2026-11-03", "description": "Mercado de la semana",
+#  "created_by": 1, "created_at": "2026-11-05T22:30:33Z", "budget_item_id": 1}
 ```
+
+Uno no planeado, en Transporte:
+
+```sh
+curl -X POST localhost:8000/spaces/1/expenses \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' \
+  -d '{"amount": 38000, "payment_type": "credit", "category_id": 3}'
+# {..., "category_id": 3, "budget_item_id": null}
+```
+
+Un rubro de otro mes se rechaza: "El rubro «Mercado» es de 2026-10 y el
+gasto es de 2026-11. Elige un rubro de 2026-11 o regístralo como no
+planeado.".
 
 **Listar por periodo.** Gastos de un mes `AAAA-MM`, del día más reciente al
 más antiguo. Sin `period`, el mes actual en `TZ`.
@@ -183,7 +270,15 @@ que es de otro espacio responde `404` "Gasto no encontrado.".
 
 **Editar.** Solo cambia lo que se envía, con las mismas reglas que al
 registrar. `"description": null` (o `""`) quita la descripción; no enviarla
-la deja como estaba.
+la deja como estaba. Con el rubro:
+
+- `"budget_item_id": 2` lo pasa a ese rubro, y a su categoría.
+- `"budget_item_id": null` lo deja no planeado, con la categoría que tenía
+  o con la que envíes en `category_id`.
+- Cambiar solo la categoría de un gasto planeado se rechaza: primero hay que
+  quitarle el rubro.
+- Cambiar la fecha de un gasto planeado a otro mes se rechaza, salvo que
+  envíes también un rubro de ese mes.
 
 ```sh
 curl -X PATCH localhost:8000/spaces/1/expenses/1 \
@@ -210,67 +305,100 @@ curl 'localhost:8000/spaces/1/expenses/recent?limit=5&mine=false' \
   -H 'Authorization: Bearer <token de Ana>'
 ```
 
-## Presupuesto y resumen
-Cada categoría puede tener un presupuesto: lo máximo que el espacio quiere
-gastar en ella cada mes. **Un presupuesto rige desde el mes en que se fija
-y en los siguientes, hasta que se cambie**: no hay que repetirlo cada mes, y
-cambiarlo desde un mes no toca los anteriores. Por qué:
-[ADR 0008](docs/adr/0008-presupuesto-vigente-desde-un-periodo.md).
-Cualquier miembro del espacio puede fijarlo, cambiarlo o quitarlo.
+## Plan del mes: rubros e ingresos
+Cada mes tiene su **plan**: los **rubros**, que son lo que piensas gastar
+("Mercado", "Arriendo"), y los **ingresos**, que son lo que esperas recibir
+("Salario"). Un rubro tiene nombre libre, una categoría y un monto; un
+ingreso, nombre y monto. Los dos son de un mes `AAAA-MM`, pasado, actual o
+futuro, que no cambia. Por qué así:
+[ADR 0012](docs/adr/0012-plan-mensual-con-rubros-e-ingresos.md).
 
-- **Monto**: las mismas reglas que el monto de un gasto, de 1 a un billón
-  de pesos enteros. No existe el presupuesto cero: para dejar una categoría
-  sin presupuesto, se quita.
-- **Periodo** (`period`): el mes `AAAA-MM` desde el que rige. Puede ser
-  pasado, actual o futuro; si no se envía, es el mes actual en `TZ`.
-  Cambiar un mes pasado cambia también los meses que lo heredan.
+- **Montos**: las mismas reglas que el monto de un gasto.
+- **Nombres**: de 1 a 50 caracteres. Dos rubros (o dos ingresos) del mismo
+  mes no pueden llamarse igual, con la comparación de las categorías:
+  "mercado" choca con "Mercado". En otro mes, sí.
+- Sin `period`, se usa el mes actual en `TZ`.
+- Cualquier miembro del espacio puede crear, editar y borrar.
 
-Por ahora el presupuesto solo se fija con la API; la web lo mostrará a
-partir de la spec 010.
-
-**Fijar.** `PUT` sobre la categoría (aquí la 2, Comida). Repetirlo con el
-mismo mes reemplaza el monto.
+**Crear un rubro.**
 
 ```sh
-curl -X PUT localhost:8000/spaces/1/budgets/2 \
+curl -X POST localhost:8000/spaces/1/budget-items \
   -H 'Authorization: Bearer <token de Ana>' \
   -H 'content-type: application/json' \
-  -d '{"period": "2026-10", "amount": 400000}'
-# {"category_id": 2, "period": "2026-10", "amount": 400000}
+  -d '{"period": "2026-11", "name": "Mercado", "category_id": 2, "amount": 800000}'
+# {"id": 1, "period": "2026-11", "name": "Mercado", "category_id": 2, "amount": 800000}
 ```
 
-**Quitar.** `"amount": null` deja la categoría sin presupuesto desde ese mes
-hasta que se fije otro. No pide confirmación porque no borra gastos.
-`amount` es obligatorio: un cuerpo `{}` responde `422` y no quita nada.
+**Crear un ingreso.**
 
 ```sh
-curl -X PUT localhost:8000/spaces/1/budgets/2 \
+curl -X POST localhost:8000/spaces/1/incomes \
   -H 'Authorization: Bearer <token de Ana>' \
   -H 'content-type: application/json' \
-  -d '{"period": "2026-12", "amount": null}'
-# {"category_id": 2, "period": "2026-12", "amount": null}
+  -d '{"period": "2026-11", "name": "Salario", "amount": 5000000}'
+# {"id": 1, "period": "2026-11", "name": "Salario", "amount": 5000000}
 ```
 
-**Resumen.** Gastado frente a presupuestado de un mes, por defecto el actual
-en `TZ`. Trae todas las categorías del espacio en orden de creación, aunque
-no tengan presupuesto ni gastos, y los totales.
+**Editar y borrar.** `PATCH /spaces/1/budget-items/1` cambia el nombre, la
+categoría o el monto; `PATCH /spaces/1/incomes/1`, el nombre o el monto. El
+mes no se cambia: para moverlo, se borra y se crea en el otro mes. Borrar
+(`DELETE`) no pide confirmación.
+
+- Si un rubro cambia de categoría, sus gastos cambian con él.
+- Borrar un rubro **no borra sus gastos**: quedan no planeados, con la
+  categoría que tenía el rubro.
+
+**Copiar el plan del mes anterior.** Crea en el mes indicado los mismos
+rubros e ingresos del mes inmediatamente anterior, con sus montos, y
+responde con el resumen del mes nuevo. Solo funciona si el mes destino
+todavía no tiene plan: nunca mezcla ni reemplaza. Los rubros de categorías
+eliminadas no se copian y salen en `skipped`.
+
+```sh
+curl -X POST localhost:8000/spaces/1/plan/copy \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' -d '{"period": "2026-12"}'
+# {"summary": {"period": "2026-12", ...}, "skipped": []}
+```
+
+Si diciembre ya tiene plan responde `409` "2026-12 ya tiene un plan; no se
+copió nada."; si noviembre no tiene nada que copiar, `409` "2026-11 no tiene
+un plan para copiar.".
+
+**Resumen.** El mes frente a su plan, por defecto el actual en `TZ`. Pedirlo
+nunca crea nada: un mes sin plan sale con listas vacías y montos en 0.
 
 ```sh
 curl 'localhost:8000/spaces/1/summary?period=2026-11' \
   -H 'Authorization: Bearer <token de Ana>'
 # {"period": "2026-11",
+#  "incomes": [{"id": 1, "name": "Salario", "amount": 5000000}],
+#  "budget_items": [
+#    {"id": 1, "name": "Mercado", "category_id": 2,
+#     "planned": 800000, "spent": 412000, "remaining": 388000},
+#    {"id": 2, "name": "Arriendo", "category_id": 1,
+#     "planned": 1500000, "spent": 1500000, "remaining": 0}],
 #  "categories": [
-#    {"category_id": 1, "name": "Hogar", "budget": null, "spent": 0, "remaining": null},
-#    {"category_id": 2, "name": "Comida", "budget": 400000, "spent": 20000, "remaining": 380000},
+#    {"category_id": 1, "name": "Hogar", "planned": 1500000, "spent": 1500000, "deleted": false},
+#    {"category_id": 2, "name": "Comida", "planned": 800000, "spent": 412000, "deleted": false},
 #    ...],
-#  "total": {"budget": 400000, "spent": 20000, "remaining": 380000}}
+#  "total": {"income": 5000000, "planned": 2300000,
+#            "spent_planned": 1912000, "spent_unplanned": 38000, "spent": 1950000,
+#            "unassigned": 2700000, "balance": 3050000}}
 ```
 
-- `budget: null`: la categoría no tiene presupuesto ese mes, así que
-  tampoco hay `remaining`.
-- `remaining` negativo: el presupuesto se excedió.
-- `total.spent` suma todos los gastos del mes, también los de categorías
-  sin presupuesto; `total.budget` suma solo los presupuestos que existen.
+- `remaining` de un rubro: planeado menos gastado; negativo si se excedió.
+- `categories`: todas las activas, y las eliminadas solo si tienen rubros o
+  gastos ese mes (`"deleted": true`). Su `spent` suma los gastos planeados y
+  los no planeados.
+- `unassigned` (sin asignar): ingresos menos planeado. `balance`: ingresos
+  menos todo lo gastado. Los dos pueden ser negativos.
+
+**El presupuesto de la 004 ya no existe.** `PUT /spaces/{id}/budgets/...`
+responde `404`. Al migrar, cada presupuesto guardado pasó a ser un rubro del
+mes desde el que regía, con el nombre de su categoría, y los gastos que ya
+había quedaron como no planeados.
 
 ## Historia: el bot de Telegram
 Las specs 005 y 006 registraban gastos conversando con un bot de Telegram.

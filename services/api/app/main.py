@@ -6,30 +6,35 @@ from fastapi import FastAPI
 # Importar la configuración aquí hace que el servicio falle al arrancar, y no
 # en la primera petición, si falta una variable obligatoria (RF-33).
 from app.config import settings  # noqa: F401
-from app.db import create_all, engine
+from app.db import engine, run_migrations
 from app.routers import (
     auth,
-    budgets,
+    budget_items,
     categories,
     expenses,
+    incomes,
     invitations,
+    plan,
     spaces,
 )
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Crea las tablas que falten antes de atender la primera petición."""
-    create_all(engine)
+    """Aplica las migraciones pendientes antes de atender la primera petición
+    (spec 008, RF-31). Si una falla, la API no arranca (RF-37)."""
+    run_migrations(engine)
     yield
 
 
 app = FastAPI(title="gastito API", lifespan=lifespan)
 app.include_router(auth.router)
-app.include_router(budgets.router)
+app.include_router(budget_items.router)
 app.include_router(categories.router)
 app.include_router(expenses.router)
+app.include_router(incomes.router)
 app.include_router(invitations.router)
+app.include_router(plan.router)
 app.include_router(spaces.router)
 
 

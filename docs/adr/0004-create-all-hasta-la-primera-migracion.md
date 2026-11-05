@@ -1,7 +1,7 @@
 # ADR 0004 — `create_all` hasta la primera migración
 
 - Fecha: 2026-09-24
-- Estado: aceptada
+- Estado: reemplazada por ADR 0011
 - Fase / spec: 1 / 001-usuarios-y-espacios
 
 ## Contexto
