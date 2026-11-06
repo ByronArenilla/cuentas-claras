@@ -268,7 +268,7 @@ Alternativas descartadas de la spec y del plan.
   plan lo cita.
 - RF: ninguno; principio 4.
 
-## [ ] T12 — Cierre: README y validación
+## [x] T12 — Cierre: README y validación
 - Comprobar con una **copia** de la base local que `make run-api` la migra
   a `0004` y conserva sus gastos.
 - `README.md`: tarjetas, compras con tarjeta y su mes de pago, plan de

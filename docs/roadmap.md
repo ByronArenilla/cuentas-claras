@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 009-tarjetas-y-cuotas
+> **Spec activa:** 010-app-web
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -32,7 +32,7 @@ está validada. Marca con [x] las specs terminadas.
     con Alembic** con un ADR que reemplaza al 0004 y otro que reemplaza al
     0008. La primera migración decide qué pasa con las tablas de Telegram
     que dejan las bases ya creadas (spec 007).
-- [ ] 009-tarjetas-y-cuotas — Tarjetas con corte, pago y tasa; compras a cuotas y la deuda que llega cada mes.
+- [x] 009-tarjetas-y-cuotas — Tarjetas con corte, pago y tasa; compras a cuotas y la deuda que llega cada mes.
   - Toda compra con tarjeta, también a 1 cuota, cuenta el mes en que se
     paga la tarjeta, no el de la compra: cada cuota entra en Deudas ese
     mes. Lleva categoría, pero no rubro. El mes del pago sale del día de
