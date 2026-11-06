@@ -912,3 +912,50 @@ class PayoffOut(BaseModel):
     prepayments: list[PrepaymentOut]
     # La deuda de la tarjeta en ese mes, con los abonos nuevos (RF-35).
     debt: int
+
+
+# --- Estado de la tarjeta y simulación (spec 009, RF-40, RF-41) ---
+
+
+class CardPurchaseStatusOut(BaseModel):
+    """Compra con cuotas del mes actual en adelante."""
+
+    expense_id: int
+    name: str
+    amount: int
+    spent_on: date
+    # Total de cuotas, tras los abonos.
+    count: int
+    # Primera cuota pendiente.
+    next_number: int
+    # Capital que falta pagar, desde el mes actual.
+    balance: int
+
+
+class CardMonthOut(BaseModel):
+    period: str
+    estimated: int
+    statement: int | None
+    prepayments: int
+    amount: int
+
+
+class CardStatusOut(BaseModel):
+    card: CardOut
+    # Capital pendiente de todas las compras, desde el mes actual (RF-40).
+    balance: int
+    purchases: list[CardPurchaseStatusOut]
+    # Deuda de cada mes desde el actual hasta el último con algo.
+    months: list[CardMonthOut]
+
+
+class SimulationIn(BaseModel):
+    # Las mismas validaciones que registrar la compra (RF-41).
+    amount: Amount
+    installments: Installments = 1
+    spent_on: SpentOn = Field(default_factory=lambda: dates.today())
+
+
+class SimulationOut(BaseModel):
+    first_due_period: str
+    installments: list[InstallmentOut]

@@ -10,7 +10,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from app import dates
-from app.models import Card, CardStatement
+from app.models import Card, CardStatement, Expense
 
 Login = Callable[..., dict[str, str]]
 
@@ -639,3 +639,191 @@ def test_the_payoff_prepayments_are_deleted_one_by_one(payoff: Payoff) -> None:
 
     assert response.status_code == 204
     assert len(payoff.schedule(payoff.tv)["installments"]) == 6
+
+
+# --- Estado de la tarjeta y simulación (RF-40, RF-41) ---
+
+# 15 de enero de 2027 a mediodía en Bogotá.
+JANUARY_15 = datetime(2027, 1, 15, 17, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def january(
+    client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> Payoff:
+    """La Visa con la "Compra TV", el "Mercado" y los "Zapatos", vista el 15
+    de enero de 2027."""
+    monkeypatch.setattr(dates, "now", lambda: JANUARY_15)
+    return Payoff(client, login("ana@example.com"))
+
+
+def status_of(space: Payoff, card_id: int | None = None) -> Response:
+    return space.client.get(
+        f"{space.base}/cards/{card_id or space.card['id']}/status",
+        headers=space.headers,
+    )
+
+
+def test_the_status_of_the_card(january: Payoff) -> None:
+    # Criterio 10 (RF-40). Los zapatos (1 cuota, 2027-01) también están
+    # pendientes en enero.
+    response = status_of(january)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["card"] == january.card
+    assert body["balance"] == 1150000
+    assert body["purchases"] == [
+        {
+            "expense_id": january.tv["id"],
+            "name": "Compra TV",
+            "amount": 1200000,
+            "spent_on": "2026-11-12",
+            "count": 6,
+            "next_number": 2,
+            "balance": 1000000,
+        },
+        {
+            "expense_id": january.zapatos["id"],
+            "name": "Zapatos",
+            "amount": 150000,
+            "spent_on": "2026-11-30",
+            "count": 1,
+            "next_number": 1,
+            "balance": 150000,
+        },
+    ]
+    assert [(row["period"], row["amount"]) for row in body["months"]] == [
+        ("2027-01", 219000 + 150000),
+        ("2027-02", 215200),
+        ("2027-03", 211400),
+        ("2027-04", 207600),
+        ("2027-05", 203800),
+    ]
+    assert body["months"][0] == {
+        "period": "2027-01",
+        "estimated": 369000,
+        "statement": None,
+        "prepayments": 0,
+        "amount": 369000,
+    }
+
+
+def test_future_statements_and_prepayments_show_up(january: Payoff) -> None:
+    january.client.put(
+        f"{january.base}/cards/{january.card['id']}/statements/2027-07",
+        json={"amount": 15000},
+        headers=january.headers,
+    )
+    january.client.post(
+        f"{january.base}/expenses/{january.tv['id']}/prepayments",
+        json={"amount": 100000, "period": "2027-03", "reduces": "installment"},
+        headers=january.headers,
+    )
+
+    months = {row["period"]: row for row in status_of(january).json()["months"]}
+
+    assert months["2027-03"]["prepayments"] == 100000
+    assert months["2027-06"]["amount"] == 0
+    assert months["2027-07"] == {
+        "period": "2027-07",
+        "estimated": 0,
+        "statement": 15000,
+        "prepayments": 0,
+        "amount": 15000,
+    }
+
+
+def test_the_status_of_an_archived_card(january: Payoff) -> None:
+    january.client.delete(
+        f"{january.base}/cards/{january.card['id']}", headers=january.headers
+    )
+
+    response = status_of(january)
+
+    assert response.status_code == 200
+    assert response.json()["card"]["deleted"] is True
+
+
+def test_a_card_without_purchases_has_an_empty_status(client: TestClient, ana) -> None:
+    headers, space_id = ana
+    card = create_card(client, headers, space_id).json()
+
+    body = client.get(
+        f"/spaces/{space_id}/cards/{card['id']}/status", headers=headers
+    ).json()
+
+    assert (body["balance"], body["purchases"], body["months"]) == (0, [], [])
+
+
+def simulate(space: Payoff, card_id: int | None = None, **body: object) -> Response:
+    return space.client.post(
+        f"{space.base}/cards/{card_id or space.card['id']}/simulate",
+        json={"amount": 1200000, "installments": 6, **body},
+        headers=space.headers,
+    )
+
+
+def test_simulating_a_purchase_saves_nothing(january: Payoff, engine: Engine) -> None:
+    # Criterio 10 (RF-41).
+    with Session(engine) as db:
+        before = db.scalar(select(func.count()).select_from(Expense))
+
+    response = simulate(january, spent_on="2026-11-12")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["first_due_period"] == "2026-12"
+    assert [
+        (row["number"], row["period"], row["capital"], row["interest"])
+        for row in body["installments"]
+    ] == [
+        (1, "2026-12", 200000, 22800),
+        (2, "2027-01", 200000, 19000),
+        (3, "2027-02", 200000, 15200),
+        (4, "2027-03", 200000, 11400),
+        (5, "2027-04", 200000, 7600),
+        (6, "2027-05", 200000, 3800),
+    ]
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(Expense)) == before
+
+
+def test_simulating_without_date_uses_today(january: Payoff) -> None:
+    # 15 de enero, corte 25: entra al corte de enero y se paga en febrero.
+    body = simulate(january, installments=1).json()
+
+    assert body["first_due_period"] == "2027-02"
+    assert body["installments"][0]["interest"] == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"installments": 49},
+        {"installments": 0},
+        {"amount": 0},
+        {"amount": 1.5},
+        {"spent_on": "2027-01-16"},
+    ],
+)
+def test_an_invalid_simulation_is_rejected(january: Payoff, body: dict) -> None:
+    assert simulate(january, **body).status_code == 422
+
+
+def test_an_archived_card_cannot_be_simulated(january: Payoff) -> None:
+    january.client.delete(
+        f"{january.base}/cards/{january.card['id']}", headers=january.headers
+    )
+
+    response = simulate(january)
+
+    assert response.status_code == 422
+    assert "fue eliminada" in response.json()["detail"]
+
+
+def test_status_and_simulation_of_a_missing_card_are_not_found(
+    january: Payoff,
+) -> None:
+    assert status_of(january, 999).status_code == 404
+    assert simulate(january, 999).status_code == 404

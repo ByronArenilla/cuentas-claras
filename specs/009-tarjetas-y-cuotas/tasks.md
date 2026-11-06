@@ -216,7 +216,7 @@ ampliados.
   verde (sin compras con tarjeta, sus totales no cambian).
 - RF: RF-34 a RF-39.
 
-## [ ] T9 — Estado de la tarjeta y simulación
+## [x] T9 — Estado de la tarjeta y simulación
 `debts.card_status`; `GET /cards/{card_id}/status` y
 `POST /cards/{card_id}/simulate`.
 

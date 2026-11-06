@@ -7,9 +7,10 @@ consultas filtran por espacio (RF-43).
 """
 
 from dataclasses import dataclass
+from datetime import date
 from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import dates
@@ -21,7 +22,15 @@ from app.installments import (
     prepayment_limit,
 )
 from app.models import Card, CardStatement, Expense, Prepayment
-from app.schemas import CardDebtOut, DebtInstallmentOut, DebtPrepaymentOut
+from app.schemas import (
+    CardDebtOut,
+    CardMonthOut,
+    CardOut,
+    CardPurchaseStatusOut,
+    CardStatusOut,
+    DebtInstallmentOut,
+    DebtPrepaymentOut,
+)
 
 
 def purchase_prepayments(db: Session, expense: Expense) -> list[Prepayment]:
@@ -279,3 +288,96 @@ def card_debts(db: Session, space_id: int, period: str) -> list[CardDebtOut]:
             )
         )
     return debts
+
+
+# --- Estado de la tarjeta (RF-40) ---
+
+
+def last_future_month(db: Session, card: Card, start: date) -> date | None:
+    """Último mes desde `start` en que la tarjeta tiene un valor real del
+    extracto o un abono, o `None` si no tiene ninguno."""
+    statement = db.scalar(
+        select(func.max(CardStatement.period_start)).where(
+            CardStatement.card_id == card.id,
+            CardStatement.space_id == card.space_id,
+            CardStatement.period_start >= start,
+        )
+    )
+    prepayment = db.scalar(
+        select(func.max(Prepayment.period_start))
+        .join(Expense, Expense.id == Prepayment.expense_id)
+        .where(
+            Expense.card_id == card.id,
+            Prepayment.space_id == card.space_id,
+            Prepayment.period_start >= start,
+        )
+    )
+    found = [month for month in (statement, prepayment) if month is not None]
+    return max(found, default=None)
+
+
+def card_status(db: Session, card: Card, current: str) -> CardStatusOut:
+    """Saldo pendiente, compras con cuotas pendientes y deuda de cada mes de
+    la tarjeta, tomando como pendientes las cuotas de `current` en adelante
+    (RF-40)."""
+    start = dates.period_bounds(current)[0]
+    purchases = list(
+        db.scalars(
+            select(Expense)
+            .where(
+                Expense.card_id == card.id,
+                Expense.space_id == card.space_id,
+                Expense.first_due_start
+                >= dates.period_bounds(dates.shift_period(current, -WINDOW_MONTHS))[0],
+            )
+            .order_by(Expense.id)
+        )
+    )
+    prepayments = prepayments_by_purchase(db, purchases)
+
+    pending_purchases = []
+    last = None
+    for purchase in purchases:
+        schedule = schedule_of(purchase, card.monthly_rate_bp, prepayments[purchase.id])
+        pending = [row for row in schedule if row.period >= current]
+        if not pending:
+            continue
+        last = max(last or pending[-1].period, pending[-1].period)
+        pending_purchases.append(
+            CardPurchaseStatusOut(
+                expense_id=purchase.id,
+                name=purchase.description or "",
+                amount=purchase.amount,
+                spent_on=purchase.spent_on,
+                count=pending[0].count,
+                next_number=pending[0].number,
+                balance=sum(row.capital for row in pending),
+            )
+        )
+
+    future = last_future_month(db, card, start)
+    if future is not None:
+        last = max(last or dates.period_of(future), dates.period_of(future))
+
+    months = []
+    if last is not None:
+        period = current
+        while period <= last:
+            month = card_month(db, card, period)
+            months.append(
+                CardMonthOut(
+                    period=period,
+                    estimated=month.estimated,
+                    statement=month.statement,
+                    prepayments=sum(row.amount for _, row in month.prepayments),
+                    amount=month.amount,
+                )
+            )
+            period = dates.shift_period(period, 1)
+
+    return CardStatusOut(
+        card=CardOut.of(card),
+        balance=sum(row.balance for row in pending_purchases),
+        purchases=pending_purchases,
+        months=months,
+    )

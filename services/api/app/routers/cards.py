@@ -1,6 +1,6 @@
 """Tarjetas de un espacio: crear, listar, editar y eliminar (spec 009, RF-1 a
-RF-8), el valor real de su extracto en un mes (RF-31 a RF-33) y pagar
-todo (RF-29, RF-30).
+RF-8), el valor real de su extracto en un mes (RF-31 a RF-33), pagar todo
+(RF-29, RF-30), su estado y la simulación de una compra (RF-40, RF-41).
 
 Eliminar una tarjeta la archiva, como una categoría: `deleted_at` deja de
 ser nula y sus compras, abonos y extractos la conservan (decisión 9).
@@ -19,17 +19,28 @@ from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
-from app.debts import LaterPrepayment, NothingToPayOff, card_month, pay_off
+from app.debts import (
+    LaterPrepayment,
+    NothingToPayOff,
+    card_month,
+    card_status,
+    pay_off,
+)
 from app.deps import INVALID_PERIOD, current_user, member_space
+from app.installments import build_schedule
 from app.models import Card, CardStatement, Space, User, category_key, utc_now
 from app.schemas import (
     CardDeletedOut,
     CardIn,
     CardOut,
     CardPatch,
+    CardStatusOut,
+    InstallmentOut,
     PayoffIn,
     PayoffOut,
     PrepaymentOut,
+    SimulationIn,
+    SimulationOut,
     StatementIn,
     StatementOut,
     rate_to_bp,
@@ -315,4 +326,42 @@ def pay_off_card(
         period=data.period,
         prepayments=[PrepaymentOut.model_validate(row) for row in created],
         debt=card_month(db, card, data.period).amount,
+    )
+
+
+# --- Estado y simulación (RF-40, RF-41) ---
+
+
+@router.get("/{card_id}/status")
+def read_status(
+    card: Annotated[Card, Depends(space_card)],
+    db: Annotated[Session, Depends(get_db)],
+) -> CardStatusOut:
+    """Saldo pendiente, compras con cuotas pendientes y deuda de los próximos
+    meses de la tarjeta, activa o archivada, desde el mes actual (RF-40). El
+    cálculo vive en `app/debts.py` (principio 10)."""
+    return card_status(db, card, dates.period_of(dates.today()))
+
+
+@router.post("/{card_id}/simulate")
+def simulate_purchase(
+    data: SimulationIn,
+    card: Annotated[Card, Depends(space_card)],
+) -> SimulationOut:
+    """Mes de pago y cuotas estimadas de una compra con la tarjeta, sin
+    guardar nada (RF-41, decisión 22). Una tarjeta archivada no admite
+    compras nuevas, así que tampoco se simula."""
+    if card.deleted_at is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"La tarjeta «{card.name}» fue eliminada. Para usarla de nuevo, "
+            "créala otra vez con el mismo nombre.",
+        )
+    first = dates.first_due_period(data.spent_on, card.cutoff_day, card.due_day)
+    schedule = build_schedule(
+        data.amount, data.installments, card.monthly_rate_bp, first, []
+    )
+    return SimulationOut(
+        first_due_period=first,
+        installments=[InstallmentOut.of(row) for row in schedule],
     )
