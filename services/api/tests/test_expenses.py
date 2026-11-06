@@ -1321,6 +1321,8 @@ class Cards(Plan):
             "description": "Compra TV",
             "amount": 1200000,
             "spent_on": "2026-11-12",
+            # Deuda, como la 009 trataba toda compra con tarjeta (spec 010).
+            "is_debt": True,
             **fields,
         }
         return self.client.post(
@@ -1524,7 +1526,8 @@ def test_debit_to_credit_needs_a_card_and_drops_the_item(cards: Cards) -> None:
 
     without_card = cards.patch(planned["id"], {"payment_type": "credit"})
     keeps_item = cards.patch(
-        planned["id"], {"payment_type": "credit", "card_id": cards.visa["id"]}
+        planned["id"],
+        {"payment_type": "credit", "card_id": cards.visa["id"], "is_debt": True},
     )
     assert without_card.json()["detail"] == CARD_REQUIRED
     assert keeps_item.json()["detail"] == NO_ITEM_ON_CARD
@@ -1535,6 +1538,7 @@ def test_debit_to_credit_needs_a_card_and_drops_the_item(cards: Cards) -> None:
             "payment_type": "credit",
             "card_id": cards.visa["id"],
             "budget_item_id": None,
+            "is_debt": True,
         },
     )
 
@@ -1549,7 +1553,11 @@ def test_debit_to_credit_needs_a_description(cards: Cards) -> None:
     unplanned = cards.register(
         category_id=cards.categories["Ocio"], spent_on="2026-11-12"
     ).json()
-    to_credit = {"payment_type": "credit", "card_id": cards.visa["id"]}
+    to_credit = {
+        "payment_type": "credit",
+        "card_id": cards.visa["id"],
+        "is_debt": True,
+    }
 
     response = cards.patch(unplanned["id"], to_credit)
     assert response.json()["detail"] == DESCRIPTION_REQUIRED
@@ -1642,11 +1650,12 @@ def test_a_legacy_credit_expense_becomes_a_card_purchase(
         description="Mercado viejo",
     )
 
-    keeps_item = cards.patch(expense_id, {"card_id": cards.visa["id"]})
+    keeps_item = cards.patch(expense_id, {"card_id": cards.visa["id"], "is_debt": True})
     assert keeps_item.json()["detail"] == NO_ITEM_ON_CARD
 
     converted = cards.patch(
-        expense_id, {"card_id": cards.visa["id"], "budget_item_id": None}
+        expense_id,
+        {"card_id": cards.visa["id"], "budget_item_id": None, "is_debt": True},
     ).json()
     assert converted["card_id"] == cards.visa["id"]
     assert (converted["installments"], converted["first_due_period"]) == (

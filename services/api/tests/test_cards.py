@@ -522,6 +522,8 @@ class Payoff:
             "amount": amount,
             "spent_on": day,
             "installments": count,
+            # Deuda, como la 009 trataba toda compra con tarjeta (spec 010).
+            "is_debt": True,
         }
         response = self.client.post(
             f"{self.base}/expenses", json=body, headers=self.headers
