@@ -82,7 +82,7 @@ contenedores de avisos, `manifest.webmanifest`, `icon.svg` y sus PNG, y
   marcada.
 - RF: RF-28, RF-31, RF-32, RF-34, RF-39.
 
-## [ ] T5 — Lógica base: formato, cliente de la API, sesión y rutas
+## [x] T5 — Lógica base: formato, cliente de la API, sesión y rutas
 `dom.js`, `format.js`, `api.js`, `session.js`, `routes.js`, `offline.js`,
 `state.js` y `main.js` (arranque y navegación entre rutas).
 

@@ -719,3 +719,10 @@ dialog::backdrop {
   padding: 0;
   grid-column: 1 / -1;
 }
+
+/* Sin conexión: lo que envía datos se ve apagado y no responde al toque
+   (RF-30). La vista además lo comprueba antes de enviar. */
+[data-offline] [data-sends] {
+  opacity: 0.45;
+  pointer-events: none;
+}
