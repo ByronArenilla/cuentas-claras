@@ -8,6 +8,7 @@ bruta: basta con SHA-256, que además es estable y permite buscarlo por hash.
 
 import hashlib
 import secrets
+from datetime import timedelta
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
@@ -43,3 +44,10 @@ def generate_invitation_token() -> str:
 def hash_token(token: str) -> str:
     """SHA-256 en hexadecimal: lo único que se guarda de un token."""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+# Una sesión caduca tras 90 días sin usarse; cada uso la renueva, como mucho
+# una vez al día (spec 011, RF-5 y decisión 9). Antes eran 15 días fijos
+# (RF-8 de la 001).
+SESSION_LIFETIME = timedelta(days=90)
+SESSION_RENEW_AFTER = timedelta(days=1)

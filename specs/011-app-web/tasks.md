@@ -10,7 +10,7 @@
 - Las tareas de pantallas tienen tests de su lógica con `node --test` y
   pasos de la lista de verificación a mano (`verificacion.md`, que crea T4).
 
-## [ ] T1 — Sesión renovable de 90 días (API)
+## [x] T1 — Sesión renovable de 90 días (API)
 `SESSION_LIFETIME` de 90 días en `auth.py` y renovación en
 `current_session` (`deps.py`), como mucho una vez al día.
 

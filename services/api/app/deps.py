@@ -21,7 +21,7 @@ from app.db import get_db
 from app.models import Membership, Space, User
 from app.models import Session as SessionRow
 from app.schemas import PERIOD_FORMAT_MESSAGE
-from app.security import hash_token
+from app.security import SESSION_LIFETIME, SESSION_RENEW_AFTER, hash_token
 
 # auto_error=False: sin cabecera devuelve None y el 401 lo decide esta capa,
 # con el mismo mensaje para todos los casos. Además, declara el esquema en
@@ -49,8 +49,14 @@ def current_session(
     )
     # Una sesión caducada se rechaza sin borrarla: una petición sin sesión
     # válida no modifica nada (RF-11).
-    if session is None or session.expires_at <= datetime.now(UTC):
+    now = datetime.now(UTC)
+    if session is None or session.expires_at <= now:
         raise UNAUTHORIZED
+    # Expiración deslizante (spec 011, RF-5): usarla la renueva a 90 días.
+    # Solo si se renovó hace más de un día, para no escribir en cada petición.
+    if session.expires_at - now < SESSION_LIFETIME - SESSION_RENEW_AFTER:
+        session.expires_at = now + SESSION_LIFETIME
+        db.commit()
     return session
 
 
