@@ -980,6 +980,8 @@ class CardPurchaseStatusOut(BaseModel):
     next_number: int
     # Capital que falta pagar, desde el mes actual.
     balance: int
+    # Spec 010: deuda o gasto del mes todavía sin pagar (RF-11).
+    is_debt: bool
 
 
 class CardMonthOut(BaseModel):
@@ -987,7 +989,12 @@ class CardMonthOut(BaseModel):
     estimated: int
     statement: int | None
     prepayments: int
+    # Deuda del mes (RF-7 de la 010).
     amount: int
+    # Gastos del mes que se pagan este mes y lo que hay que pagar (RF-11 de
+    # la 010).
+    month_expenses: int
+    to_pay: int
 
 
 class CardStatusOut(BaseModel):

@@ -324,7 +324,7 @@ def card_debts(db: Session, space_id: int, period: str) -> list[CardDebtOut]:
                 month_expenses=[
                     MonthExpenseOut(
                         expense_id=purchase.id,
-                        name=month_expense_name(db, purchase),
+                        name=purchase_name(db, purchase),
                         amount=row.amount,
                     )
                     for purchase, row in month.month_expenses
@@ -338,9 +338,10 @@ def card_debts(db: Session, space_id: int, period: str) -> list[CardDebtOut]:
     return debts
 
 
-def month_expense_name(db: Session, expense: Expense) -> str:
-    """Nombre de un gasto del mes en Deudas: su descripción, o el nombre de su
-    rubro, o el de su categoría (RF-10 de la 010)."""
+def purchase_name(db: Session, expense: Expense) -> str:
+    """Nombre de una compra con tarjeta: su descripción, o el nombre de su
+    rubro, o el de su categoría (RF-10 de la 010). Una deuda siempre tiene
+    descripción; un gasto del mes, no siempre."""
     if expense.description:
         return expense.description
     if expense.budget_item_id is not None:
@@ -404,12 +405,13 @@ def card_status(db: Session, card: Card, current: str) -> CardStatusOut:
         pending_purchases.append(
             CardPurchaseStatusOut(
                 expense_id=purchase.id,
-                name=purchase.description or "",
+                name=purchase_name(db, purchase),
                 amount=purchase.amount,
                 spent_on=purchase.spent_on,
                 count=pending[0].count,
                 next_number=pending[0].number,
                 balance=sum(row.capital for row in pending),
+                is_debt=bool(purchase.is_debt),
             )
         )
 
@@ -427,8 +429,10 @@ def card_status(db: Session, card: Card, current: str) -> CardStatusOut:
                     period=period,
                     estimated=month.estimated,
                     statement=month.statement,
-                    prepayments=sum(row.amount for _, row in month.prepayments),
+                    prepayments=month.prepaid,
                     amount=month.amount,
+                    month_expenses=month.month_total,
+                    to_pay=month.to_pay,
                 )
             )
             period = dates.shift_period(period, 1)

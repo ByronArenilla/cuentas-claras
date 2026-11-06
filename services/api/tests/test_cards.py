@@ -684,6 +684,7 @@ def test_the_status_of_the_card(january: Payoff) -> None:
             "count": 6,
             "next_number": 2,
             "balance": 1000000,
+            "is_debt": True,
         },
         {
             "expense_id": january.zapatos["id"],
@@ -693,6 +694,7 @@ def test_the_status_of_the_card(january: Payoff) -> None:
             "count": 1,
             "next_number": 1,
             "balance": 150000,
+            "is_debt": True,
         },
     ]
     assert [(row["period"], row["amount"]) for row in body["months"]] == [
@@ -708,6 +710,8 @@ def test_the_status_of_the_card(january: Payoff) -> None:
         "statement": None,
         "prepayments": 0,
         "amount": 369000,
+        "month_expenses": 0,
+        "to_pay": 369000,
     }
 
 
@@ -733,6 +737,8 @@ def test_future_statements_and_prepayments_show_up(january: Payoff) -> None:
         "statement": 15000,
         "prepayments": 0,
         "amount": 15000,
+        "month_expenses": 0,
+        "to_pay": 15000,
     }
 
 
@@ -829,3 +835,78 @@ def test_status_and_simulation_of_a_missing_card_are_not_found(
 ) -> None:
     assert status_of(january, 999).status_code == 404
     assert simulate(january, 999).status_code == 404
+
+
+# --- Gasto del mes con tarjeta (spec 010) ---
+
+
+@pytest.fixture
+def with_month_expense(
+    client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Payoff, dict]:
+    """La Visa con la "Compra TV" (deuda) y un "Mercado" de 200.000 del 5 de
+    noviembre como gasto del mes, vista el 1 de diciembre."""
+    monkeypatch.setattr(dates, "now", lambda: DECEMBER_1)
+    space = Payoff.__new__(Payoff)
+    space.client, space.headers = client, login("ana@example.com")
+    space.space_id = personal_space(client, space.headers)
+    space.base = f"/spaces/{space.space_id}"
+    space.card = create_card(client, space.headers, space.space_id).json()
+    space.tv = space.purchase("Compra TV", 1200000, "2026-11-12", 6)
+    categories = client.get(f"{space.base}/categories", headers=space.headers).json()
+    mercado = client.post(
+        f"{space.base}/expenses",
+        json={
+            "payment_type": "credit",
+            "card_id": space.card["id"],
+            "category_id": categories[1]["id"],
+            "amount": 200000,
+            "spent_on": "2026-11-05",
+            "is_debt": False,
+        },
+        headers=space.headers,
+    ).json()
+    return space, mercado
+
+
+def test_the_status_counts_month_expenses_not_yet_paid(with_month_expense) -> None:
+    # Criterio 6 de la 010 (RF-11, decisión 13).
+    space, mercado = with_month_expense
+
+    body = status_of(space).json()
+
+    assert body["balance"] == 1400000
+    [tv, month_expense] = body["purchases"]
+    assert (tv["name"], tv["is_debt"]) == ("Compra TV", True)
+    assert month_expense == {
+        "expense_id": mercado["id"],
+        "name": "Comida",
+        "amount": 200000,
+        "spent_on": "2026-11-05",
+        "count": 1,
+        "next_number": 1,
+        "balance": 200000,
+        "is_debt": False,
+    }
+    december = next(row for row in body["months"] if row["period"] == "2026-12")
+    assert december == {
+        "period": "2026-12",
+        "estimated": 222800,
+        "statement": None,
+        "prepayments": 0,
+        "amount": 222800,
+        "month_expenses": 200000,
+        "to_pay": 422800,
+    }
+
+
+def test_paying_off_leaves_month_expenses_alone(with_month_expense) -> None:
+    # Decisión 11 de la 010: un gasto del mes no tiene saldo que saldar.
+    space, mercado = with_month_expense
+
+    body = space.pay_off(period="2026-12").json()
+
+    assert [row["expense_id"] for row in body["prepayments"]] == [space.tv["id"]]
+    # La deuda de diciembre: la cuota de la TV más su saldo, sin el mercado.
+    assert body["debt"] == 222800 + 1000000
+    assert space.schedule(mercado)["prepayments"] == []

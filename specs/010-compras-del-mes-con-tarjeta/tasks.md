@@ -57,7 +57,7 @@ totales.
 - Hecho cuando: los tests pasan.
 - RF: RF-6 a RF-10.
 
-## [ ] T4 — Estado de la tarjeta y pagar todo
+## [x] T4 — Estado de la tarjeta y pagar todo
 `card_status` con gastos del mes; `PayoffOut` sin cambios de reglas.
 
 - Test primero (`test_cards.py`):
