@@ -3,6 +3,7 @@
 // cerrar sesión (decisión 22) y la guía para fijar la app (T11).
 import { logOut } from "../account.js";
 import { h } from "../dom.js";
+import { pinGuide } from "../platform.js";
 import { createSpace, leaveSpace, shareInvitation } from "../spaces.js";
 import { OFFLINE_SAVE, field, formError, setBusy, showErrors } from "./form.js";
 
@@ -192,6 +193,28 @@ function accountSection(app) {
   );
 }
 
+/** Los pasos para fijar la app en este navegador; nada si ya está fijada
+ * (RF-29, decisión 20). */
+function pinSection() {
+  const standalone =
+    window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const guide = pinGuide(navigator.userAgent, { standalone });
+  if (!guide) return null;
+  return h(
+    "section",
+    { class: "stack", "aria-labelledby": "pin-title" },
+    h("h2", { id: "pin-title" }, "Fijar en la pantalla de inicio"),
+    h(
+      "p",
+      { class: "muted" },
+      "Así gastito se abre como una aplicación, sin buscarla en el navegador. No se descarga nada.",
+    ),
+    h("p", { class: "label" }, guide.title),
+    guide.steps.length > 0 && h("ol", { class: "steps" }, guide.steps.map((step) => h("li", {}, step))),
+    guide.note && h("p", { class: "muted" }, guide.note),
+  );
+}
+
 export async function renderSpace(main, app) {
   // La lista de espacios puede haber cambiado en otro dispositivo.
   await app.loadAccount();
@@ -204,6 +227,7 @@ export async function renderSpace(main, app) {
       shareSection(app),
       createSection(app),
       app.spaces.length > 1 && leaveSection(app),
+      pinSection(),
       accountSection(app),
     ),
   );

@@ -74,5 +74,6 @@ export function setBusy(button, busy, busyLabel) {
   }
 }
 
-export const OFFLINE_SAVE =
-  "Sin conexión. Lo que escribiste se queda aquí; podrás guardarlo cuando vuelva la conexión.";
+// La explicación larga está en la franja de "Sin conexión" (notices.js); aquí
+// basta decir que no se guardó.
+export const OFFLINE_SAVE = "Sin conexión: todavía no se puede guardar.";

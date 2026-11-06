@@ -195,7 +195,7 @@ del espacio actual en todas las pantallas.
 - Hecho cuando: los tests pasan y la verificación está marcada.
 - RF: RF-23 a RF-26.
 
-## [ ] T11 — Unirse por enlace, fijar la app y aviso sin conexión
+## [x] T11 — Unirse por enlace, fijar la app y aviso sin conexión
 `views/join.js`, la guía de fijar en `views/space.js` con `platform.js`, y
 el aviso sin conexión en `views/notices.js`.
 
