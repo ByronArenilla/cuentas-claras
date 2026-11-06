@@ -15,6 +15,7 @@ from app.models import Session as SessionRow
 from app.routers.categories import add_default_categories
 from app.schemas import LoginIn, RegisterIn, RegisterOut, SpaceOut, TokenOut, UserOut
 from app.security import (
+    SESSION_LIFETIME,
     generate_session_token,
     hash_password,
     hash_token,
@@ -24,7 +25,6 @@ from app.security import (
 # Nombre fijo del espacio que se crea con cada usuario (spec 001, decisión 7).
 PERSONAL_SPACE_NAME = "Personal"
 
-SESSION_LIFETIME = timedelta(days=15)
 
 EMAIL_TAKEN = "Ya existe una cuenta con ese correo."
 
@@ -73,7 +73,7 @@ def register(data: RegisterIn, db: Annotated[Session, Depends(get_db)]) -> Regis
 
 def create_session(db: Session, user_id: int, lifetime: timedelta) -> TokenOut:
     """Crea una sesión que caduca tras `lifetime` y entrega su token; guarda
-    solo el hash (RF-8). La usa el inicio de sesión (15 días); la duración
+    solo el hash (RF-8). La usa el inicio de sesión (90 días); la duración
     sigue siendo un parámetro aunque el bot que pedía una hora se retiró
     (spec 007, decisión 4)."""
     token = generate_session_token()

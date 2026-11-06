@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>gastito</title>
+  <meta name="description" content="El presupuesto del mes: planéalo y registra cada gasto desde el celular.">
+  <!-- Color de la barra del navegador y del sistema, según el tema (decisión 4). -->
+  <meta name="theme-color" content="#e9eee6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111823" media="(prefers-color-scheme: dark)">
+  <!-- iPhone: abrir fijada sin la barra de Safari y con este nombre. -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="gastito">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="preload" href="/fonts/IBMPlexSans-Regular-Latin1.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/IBMPlexMono-Regular-Latin1.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/main.js"></script>
+</head>
+<body>
+  <div class="app" id="app" data-guest>
+    <nav class="tabs" aria-label="Secciones">
+      <span class="tabs__brand">gastito</span>
+      <a href="/registrar" data-section="record">Registrar</a>
+      <a href="/gastos" data-section="expenses">Gastos</a>
+      <a href="/espacio" data-section="space">Espacio</a>
+    </nav>
+    <header class="topbar">
+      <span class="topbar__space" id="space-name"></span>
+      <span class="topbar__month label" id="current-month"></span>
+    </header>
+    <!-- Registrado, errores y sin conexión: se anuncian al lector de pantalla (RF-33). -->
+    <div class="notices" id="notices" aria-live="polite"></div>
+    <main class="main" id="main" tabindex="-1">
+      <noscript>
+        <p class="auth">gastito necesita JavaScript para funcionar. Actívalo en tu navegador.</p>
+      </noscript>
+    </main>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+</body>
+</html>

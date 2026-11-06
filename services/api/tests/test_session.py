@@ -50,13 +50,14 @@ def test_login_returns_token_and_stores_only_its_hash(
     assert token not in row.token_hash
 
 
-def test_session_lasts_fifteen_days(client: TestClient, engine: Engine) -> None:
+def test_session_lasts_ninety_days(client: TestClient, engine: Engine) -> None:
+    # Spec 011, RF-5: cambia los 15 días de la 001.
     register(client)
 
     post_login(client, "ana@example.com")
 
     [row] = session_rows(engine)
-    expected = datetime.now(UTC) + timedelta(days=15)
+    expected = datetime.now(UTC) + timedelta(days=90)
     assert abs(row.expires_at - expected) < timedelta(minutes=1)
 
 
@@ -180,3 +181,72 @@ def test_request_without_session_changes_nothing(
 
     assert response.status_code == 401
     assert count_sessions(engine) == 1
+
+
+# --- Sesión renovable (spec 011, RF-5) ---
+
+
+def logged_in(client: TestClient) -> dict[str, str]:
+    register(client)
+    token = post_login(client, "ana@example.com").json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def set_expiry(engine: Engine, expires_at: datetime) -> None:
+    """Mueve la caducidad de la única sesión: así se simula que pasaron días
+    sin cambiar el reloj."""
+    with Session(engine) as db:
+        row = db.scalars(select(SessionRow)).one()
+        row.expires_at = expires_at
+        db.commit()
+
+
+def expiry(engine: Engine) -> datetime:
+    [row] = session_rows(engine)
+    return row.expires_at
+
+
+def test_using_the_session_renews_it_to_ninety_days(
+    client: TestClient, engine: Engine
+) -> None:
+    # Como si se hubiera entrado hace 10 días.
+    headers = logged_in(client)
+    set_expiry(engine, datetime.now(UTC) + timedelta(days=80))
+
+    assert client.get("/me", headers=headers).status_code == 200
+
+    expected = datetime.now(UTC) + timedelta(days=90)
+    assert abs(expiry(engine) - expected) < timedelta(minutes=1)
+
+
+def test_the_session_is_renewed_at_most_once_a_day(
+    client: TestClient, engine: Engine
+) -> None:
+    # Renovada hace unas horas: le quedan más de 89 días y no se escribe.
+    headers = logged_in(client)
+    recent = datetime.now(UTC) + timedelta(days=89, hours=20)
+    set_expiry(engine, recent)
+
+    client.get("/me", headers=headers)
+    client.get("/spaces", headers=headers)
+
+    assert abs(expiry(engine) - recent) < timedelta(seconds=1)
+
+
+def test_an_expired_session_is_not_renewed(client: TestClient, engine: Engine) -> None:
+    headers = logged_in(client)
+    expired = datetime.now(UTC) - timedelta(minutes=1)
+    set_expiry(engine, expired)
+
+    assert client.get("/me", headers=headers).status_code == 401
+    assert abs(expiry(engine) - expired) < timedelta(seconds=1)
+
+
+def test_logging_out_ends_a_renewed_session(client: TestClient, engine: Engine) -> None:
+    headers = logged_in(client)
+    set_expiry(engine, datetime.now(UTC) + timedelta(days=30))
+    client.get("/me", headers=headers)
+
+    client.post("/auth/logout", headers=headers)
+
+    assert client.get("/me", headers=headers).status_code == 401

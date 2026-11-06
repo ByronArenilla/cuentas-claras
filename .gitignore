@@ -10,8 +10,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Base de datos local
+# Base de datos local y sus copias antes de migrar (README, "Base de datos y
+# migraciones"): tienen datos reales y nunca van al repositorio.
 *.db
+*.db.antes-*
 *.sqlite3
 
 # Sistema operativo y editores
