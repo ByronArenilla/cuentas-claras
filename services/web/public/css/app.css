@@ -22,6 +22,12 @@ body {
   height: 100%;
 }
 
+/* `hidden` siempre oculta: sin esto, una regla como `.row { display: grid }`
+   lo pisaría y el elemento seguiría a la vista. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   background: var(--paper);
   color: var(--ink);
@@ -560,6 +566,12 @@ button {
   border-top: var(--rule-width) solid var(--ink);
   border-bottom: var(--rule-width) solid var(--ink);
   font-size: 0.9375rem;
+}
+
+/* Las cifras de la nota pueden partirse en el celular. */
+.note .figure {
+  white-space: normal;
+  text-align: left;
 }
 
 /* --- Listas de gastos --- */

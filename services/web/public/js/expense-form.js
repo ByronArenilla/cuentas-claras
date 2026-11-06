@@ -8,7 +8,20 @@
 // los rubros del mes; elegir uno lo liga al rubro y la categoría sale de él.
 // Si no se elige ninguno, se pide la categoría y el texto es la descripción.
 
-import { periodOf } from "./format.js";
+import { monthName, periodOf } from "./format.js";
+
+/** Cuotas que se eligen con un toque (RF-12); las demás, de 1 a 48, se
+ * escriben. */
+export const QUICK_INSTALLMENTS = [1, 2, 3, 6, 12, 24, 36];
+export const MAX_INSTALLMENTS = 48;
+
+/** Cuotas escritas: entero de 1 a 48, o `null`. */
+export function parseInstallments(text) {
+  const trimmed = String(text).trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return value >= 1 && value <= MAX_INSTALLMENTS ? value : null;
+}
 
 const TILDE = "̃";
 
@@ -100,21 +113,46 @@ export function usesItems(form) {
   return kind === "debit" || kind === "month";
 }
 
-/** Lo que falta para poder registrar, en el orden del formulario. */
-export function missing(form) {
+const NO_CARDS =
+  "Este espacio todavía no tiene tarjetas. Por ahora se crean con la API (README, «Tarjetas»).";
+
+/** Lo que falta para poder registrar, en el orden del formulario.
+ * `hasCards: false` si el espacio no tiene tarjetas activas (RF-10). */
+export function missing(form, { hasCards = true } = {}) {
   const found = [];
   if (!form.amount) found.push("Escribe el monto.");
+  if (form.paymentType === "credit") {
+    if (!hasCards) return [...found, NO_CARDS];
+    if (form.cardId === null) found.push("Elige la tarjeta.");
+    if (form.installments === null) {
+      found.push(`Las cuotas deben ser un número entero de 1 a ${MAX_INSTALLMENTS}.`);
+      return found;
+    }
+  }
+  const kind = kindOf(form);
+  if (kind === "undecided") found.push("Elige si estaba en el plan de este mes.");
   if (usesItems(form) && form.itemId === null && form.categoryId === null) {
     found.push("Elige un rubro del mes o la categoría.");
+  }
+  if (kind === "debt") {
+    if (!form.description.trim()) found.push("Escribe qué fue: es el nombre de la deuda.");
+    if (form.categoryId === null) found.push("Elige la categoría.");
   }
   return found;
 }
 
-/** El cuerpo de `POST /expenses` (criterio 1). */
+/** El cuerpo de `POST /expenses` (criterio 1). A crédito lleva tarjeta,
+ * cuotas e `is_debt` (spec 010); una deuda, categoría y descripción, nunca
+ * rubro. */
 export function buildExpense(form) {
   const body = { amount: form.amount, payment_type: form.paymentType };
   const description = form.description.trim();
-  if (form.itemId !== null) {
+  if (form.paymentType === "credit") {
+    body.card_id = form.cardId;
+    body.installments = form.installments;
+    body.is_debt = kindOf(form) === "debt";
+  }
+  if (form.itemId !== null && usesItems(form)) {
     body.budget_item_id = form.itemId;
   } else {
     body.category_id = form.categoryId;
@@ -124,8 +162,32 @@ export function buildExpense(form) {
   return body;
 }
 
+/** La petición de simulación (RF-11): solo a crédito, con monto, tarjeta y
+ * cuotas válidas. */
+export function simulationRequest(form) {
+  if (form.paymentType !== "credit" || !form.amount || form.cardId === null) return null;
+  if (form.installments === null) return null;
+  const body = { amount: form.amount, installments: form.installments };
+  if (form.date) body.spent_on = form.date;
+  return { cardId: form.cardId, body };
+}
+
+/** Lo que se muestra antes de guardar: mes de la primera y de la última
+ * cuota, número de cuotas, la primera y los intereses estimados. */
+export function simulationSummary(simulation) {
+  const rows = simulation.installments;
+  return {
+    firstMonth: monthName(simulation.first_due_period),
+    lastMonth: monthName(rows[rows.length - 1].period),
+    count: rows[0].count,
+    first: rows[0].amount,
+    interest: rows.reduce((total, row) => total + row.interest, 0),
+  };
+}
+
 /** El formulario listo para el siguiente gasto: se limpian monto y qué fue, y
- * se conservan el tipo de pago, la tarjeta y la fecha (RF-14). */
+ * se conservan el tipo de pago, la tarjeta y la fecha (RF-14). La pregunta
+ * "¿Estaba en el plan?" vuelve a quedar sin respuesta (decisión 26). */
 export function afterRecord(form) {
   return newForm({ paymentType: form.paymentType, cardId: form.cardId, date: form.date });
 }

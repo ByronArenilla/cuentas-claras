@@ -138,7 +138,7 @@ fue" con sugerencias de rubros, categoría, fecha, envío y "Deshacer".
 - Hecho cuando: los tests pasan y la verificación está marcada.
 - RF: RF-6 a RF-9, RF-13 a RF-16.
 
-## [ ] T8 — Registrar un gasto a crédito
+## [x] T8 — Registrar un gasto a crédito
 Crédito en `expense-form.js` y `views/record.js`: tarjeta, cuotas,
 categoría, descripción obligatoria y la simulación.
 
