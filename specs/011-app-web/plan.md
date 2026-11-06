@@ -19,7 +19,8 @@ plan tiene cinco partes:
    vistas que los usan y tocan el DOM.
 5. **Pantallas**: entrar, Registrar, Gastos, Espacio y unirse.
 
-Las decisiones técnicas quedan en el ADR **0015**: sesión en `localStorage`
+Las decisiones técnicas quedan en el
+[ADR 0015](../../docs/adr/0015-web-sin-framework-sesion-y-pruebas.md): sesión en `localStorage`
 con CSP, servidor de desarrollo propio, CORS, sesión renovable y pruebas
 con `node --test`.
 

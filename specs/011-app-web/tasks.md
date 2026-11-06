@@ -233,7 +233,7 @@ Pasada completa con la sección "Diseño" de la spec.
   ancho, el tamaño de "Volver a Gastos" y la negrita sintética de las
   cifras. Falta la verificación en Android y en iPhone.
 
-## [ ] T13 — ADR 0015
+## [x] T13 — ADR 0015
 `docs/adr/0015-web-sin-framework-sesion-y-pruebas.md`: token en
 `localStorage` con CSP (y la cookie `HttpOnly` descartada), servidor de
 desarrollo propio hasta la fase 2, CORS por `WEB_BASE_URL`, sesión de 90
