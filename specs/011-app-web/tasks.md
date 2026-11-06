@@ -61,7 +61,7 @@ mínimo, `make run-web` y `make test`/`make lint` con la web; `BIND_HOST` en
   `http://localhost:8080` y `make lint` revisa también `serve.py`.
 - RF: RF-36, RF-37, RF-39.
 
-## [ ] T4 — Base visual: tokens, fuentes, navegación, manifiesto e íconos
+## [x] T4 — Base visual: tokens, fuentes, navegación, manifiesto e íconos
 `tokens.css` (los dos temas), `app.css` (base, retícula, renglones,
 botones, campos, navegación inferior y lateral, avisos, diálogo, estados),
 fuentes IBM Plex con su OFL, `index.html` con la navegación y los

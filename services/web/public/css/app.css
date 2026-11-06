@@ -1,0 +1,721 @@
+/*
+ * Estilos de gastito (spec 011, sección "Diseño"). Solo usa los tokens de
+ * tokens.css.
+ *
+ * Principios: renglones y no tarjetas; cifras monoespaciadas alineadas a la
+ * derecha; un solo color de acción (la tinta); el rojo solo significa algo
+ * (doble raya, excedido, errores); sin sombras, degradados ni emojis.
+ * Pensado primero para el celular (360 px); desde 1024 px, menú lateral.
+ */
+
+/* --- Base --- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-text);
+  font-size: var(--size-text);
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--size-title);
+}
+
+h2 {
+  font-size: var(--size-strong);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Cifras: monoespaciadas, tabulares y a la derecha (principio 2). */
+.figure {
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.label {
+  font-family: var(--font-figures);
+  font-size: var(--size-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* --- Esqueleto: encabezado, contenido y navegación --- */
+
+.app {
+  min-height: 100%;
+  display: grid;
+  /* `minmax(0, …)`: una columna `1fr` crecería con su contenido más ancho y la
+     página se desbordaría a lo ancho en el celular. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto 1fr;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--gutter);
+  padding-top: max(var(--space-3), env(safe-area-inset-top));
+  border-bottom: var(--rule-width) solid var(--rule);
+}
+
+.topbar__space {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar__month {
+  flex: none;
+}
+
+.main {
+  width: 100%;
+  max-width: var(--content);
+  padding: 0 var(--gutter);
+  /* Deja sitio a la navegación fija del celular. */
+  padding-bottom: calc(var(--row) + var(--space-6) + env(safe-area-inset-bottom));
+}
+
+.main--wide {
+  max-width: var(--content-wide);
+}
+
+.tabs {
+  position: fixed;
+  inset: auto 0 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--paper);
+  border-top: var(--rule-width) solid var(--ink);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+}
+
+.tabs a {
+  min-height: calc(var(--row) + var(--space-1));
+  display: grid;
+  place-items: center;
+  font-size: var(--size-label);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 3px 0 var(--red);
+}
+
+.tabs__brand {
+  display: none;
+}
+
+/* Computador: menú lateral con el espacio arriba (Diseño, Navegación). */
+@media (min-width: 1024px) {
+  .app {
+    grid-template-columns: var(--sidebar) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr;
+  }
+
+  .topbar,
+  .notices {
+    grid-column: 2;
+  }
+
+  .main {
+    grid-column: 2;
+    padding-bottom: var(--space-8);
+  }
+
+  .tabs {
+    position: sticky;
+    top: 0;
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    border-top: 0;
+    border-right: var(--rule-width) solid var(--ink);
+    padding: var(--space-5) 0;
+  }
+
+  .tabs__brand {
+    display: block;
+    padding: 0 var(--gutter) var(--space-5);
+    font-family: var(--font-figures);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    border-bottom: var(--double-rule);
+    margin-bottom: var(--space-3);
+  }
+
+  .tabs a {
+    justify-items: start;
+    padding: 0 var(--gutter);
+  }
+
+  .tabs a[aria-current="page"] {
+    box-shadow: inset 3px 0 0 var(--red);
+    background: var(--field);
+  }
+}
+
+/* --- Bloques de una pantalla --- */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-top: var(--space-5);
+}
+
+.screen__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* --- Renglones (principio 1) --- */
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--rule-width) solid var(--rule);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: var(--label-column) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  border-bottom: var(--rule-width) solid var(--rule);
+}
+
+/* Un renglón con un campo: su línea es el borde del campo, así que lleva el
+   contraste de un control (3:1, RF-32). El campo no dibuja otra línea. */
+.row:has(.input, .select) {
+  border-bottom-color: var(--rule-strong);
+}
+
+.row:has(.input:focus-visible, .select:focus-visible) {
+  border-bottom: 2px solid var(--ink);
+}
+
+.row:has([aria-invalid="true"]) {
+  border-bottom: 2px solid var(--red);
+}
+
+.row > .seg,
+.row > .chips {
+  justify-self: start;
+}
+
+.row--block {
+  grid-template-columns: 1fr;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+}
+
+.row__hint {
+  grid-column: 2;
+  font-size: var(--size-label);
+  color: var(--muted);
+  padding-bottom: var(--space-2);
+}
+
+.row__error {
+  grid-column: 1 / -1;
+  color: var(--red);
+  font-size: 0.875rem;
+  padding-bottom: var(--space-2);
+}
+
+/* --- Campos --- */
+
+.input,
+.select {
+  width: 100%;
+  min-height: var(--touch);
+  padding: var(--space-2) 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: var(--size-text);
+}
+
+/* El foco lo marca la línea del renglón en tinta, más el fondo del campo. */
+.input:focus-visible,
+.select:focus-visible {
+  outline: none;
+  background: var(--field);
+}
+
+.select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+    linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 55%, calc(100% - 7px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: var(--space-6);
+}
+
+/* El monto: lo primero que se escribe, en cifras grandes y con la doble raya
+   roja de un total (principio 6). */
+.amount {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-6) 0 var(--space-3);
+  border-bottom: var(--double-rule);
+}
+
+.amount__currency {
+  font-family: var(--font-figures);
+  color: var(--muted);
+  font-size: var(--size-strong);
+}
+
+.amount__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-figures);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--size-amount);
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.amount__input:focus-visible {
+  outline: none;
+}
+
+.amount:focus-within {
+  background: var(--field);
+}
+
+/* Un campo que no se puede editar se lee como texto, con su razón (Estados,
+   Bloqueado). */
+.locked {
+  padding: var(--space-2) 0;
+}
+
+.locked__reason {
+  display: block;
+  font-size: var(--size-label);
+  color: var(--muted);
+}
+
+/* --- Botones --- */
+
+.button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row);
+  padding: 0 var(--space-5);
+  border: var(--rule-width) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  transition: opacity var(--transition);
+}
+
+.button--block {
+  width: 100%;
+}
+
+.button--quiet {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+
+.button--danger {
+  background: transparent;
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.button--link {
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  text-decoration: underline;
+  font-weight: 400;
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.submit {
+  padding: var(--space-5) 0;
+}
+
+/* Botones de una sola elección (tipo de pago, ¿del mes o deuda?). */
+.seg {
+  display: inline-flex;
+  border: var(--rule-width) solid var(--ink);
+  border-radius: var(--radius);
+}
+
+.seg button {
+  min-height: var(--touch);
+  padding: 0 var(--space-4);
+  border: 0;
+  background: transparent;
+}
+
+.seg button + button {
+  border-left: var(--rule-width) solid var(--ink);
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Dos respuestas a todo el ancho, para preguntas con texto largo
+   ("Sí, es del mes" / "No, es una deuda"). */
+.seg--full {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+}
+
+/* Cuotas rápidas (RF-12). */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+
+.chips button {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  border: var(--rule-width) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  font-family: var(--font-figures);
+}
+
+.chips button[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.chips input {
+  width: 4.5em;
+  min-height: var(--touch);
+  border: var(--rule-width) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: center;
+  font-family: var(--font-figures);
+}
+
+/* --- Sugerencias de rubros (RF-8) --- */
+
+.suggestions {
+  margin: 0 calc(-1 * var(--gutter));
+  padding: 0;
+  list-style: none;
+  border-bottom: var(--rule-width) solid var(--rule);
+}
+
+.suggestions button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--space-2);
+  min-height: var(--row);
+  padding: var(--space-2) var(--gutter) var(--space-2)
+    calc(var(--gutter) + var(--label-column) + var(--space-3));
+  border: 0;
+  border-top: var(--rule-width) dotted var(--rule);
+  background: transparent;
+  text-align: left;
+}
+
+.suggestions button:hover,
+.suggestions button:focus-visible,
+.suggestions button[aria-selected="true"] {
+  background: var(--field);
+}
+
+.suggestions small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: var(--size-label);
+}
+
+/* El mes de pago y las cuotas antes de guardar (RF-11). */
+.note {
+  padding: var(--space-3) 0;
+  border-top: var(--rule-width) solid var(--ink);
+  border-bottom: var(--rule-width) solid var(--ink);
+  font-size: 0.9375rem;
+}
+
+/* --- Listas de gastos --- */
+
+.day {
+  margin: var(--space-5) 0 0;
+  padding-bottom: var(--space-1);
+  border-bottom: var(--rule-width) solid var(--ink);
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--space-3);
+  align-items: baseline;
+  min-height: var(--row);
+  padding: var(--space-2) 0;
+  border-bottom: var(--rule-width) solid var(--rule);
+  color: inherit;
+  text-decoration: none;
+}
+
+.entry:hover {
+  background: var(--field);
+}
+
+.entry__meta {
+  grid-column: 1 / -1;
+  font-size: var(--size-label);
+  color: var(--muted);
+}
+
+.total {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  padding: var(--space-3) 0;
+  border-bottom: var(--double-rule);
+  font-weight: 600;
+}
+
+.month-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.month-switch button {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  border: var(--rule-width) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+/* --- Avisos (RF-30, Estados) --- */
+
+.notices {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.notice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: var(--space-2) var(--gutter);
+  background: var(--field);
+  border-bottom: var(--rule-width) solid var(--ink);
+  border-left: 4px solid var(--ink);
+}
+
+.notice--error {
+  border-left-color: var(--red);
+}
+
+.offline {
+  padding: var(--space-3) var(--gutter);
+  border-bottom: var(--double-rule);
+  background: var(--paper);
+  font-size: 0.9375rem;
+}
+
+.error {
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border-left: 4px solid var(--red);
+  background: var(--field);
+}
+
+.empty {
+  padding: var(--space-5) 0;
+  border-bottom: var(--rule-width) solid var(--rule);
+}
+
+/* Cargando: renglones vacíos con filete punteado, sin animaciones. */
+.loading {
+  height: calc(var(--row) * 3);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--row) - 1px),
+    var(--rule) calc(var(--row) - 1px),
+    var(--rule) var(--row)
+  );
+}
+
+/* --- Diálogo de confirmación (decisión 23) --- */
+
+dialog {
+  width: min(420px, calc(100% - 2 * var(--gutter)));
+  padding: var(--space-6);
+  border: var(--rule-width) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+dialog::backdrop {
+  background: rgb(10 14 20 / 55%);
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+/* --- Entrar y crear cuenta --- */
+
+.auth {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--gutter);
+}
+
+.wordmark {
+  font-family: var(--font-figures);
+  font-weight: 500;
+  font-size: var(--size-title);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--double-rule);
+  margin-bottom: var(--space-6);
+}
+
+.auth .row {
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding-top: var(--space-2);
+}
+
+/* Las pantallas sin sesión no tienen navegación ni encabezado. */
+.app[data-guest] .tabs,
+.app[data-guest] .topbar {
+  display: none;
+}
+
+.app[data-guest] .main {
+  max-width: none;
+  padding: 0;
+  grid-column: 1 / -1;
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Una línea del libro auxiliar: renglones azules, una cifra en tinta y la
+       doble raya roja del total. Mismos colores que tokens.css (tema claro). -->
+  <rect width="512" height="512" rx="96" fill="#e9eee6"/>
+  <g stroke-linecap="butt">
+    <line x1="112" y1="148" x2="400" y2="148" stroke="#5f7590" stroke-width="12"/>
+    <line x1="112" y1="212" x2="400" y2="212" stroke="#5f7590" stroke-width="12"/>
+    <line x1="112" y1="276" x2="400" y2="276" stroke="#5f7590" stroke-width="12"/>
+    <line x1="256" y1="250" x2="400" y2="250" stroke="#18233a" stroke-width="28"/>
+    <line x1="112" y1="336" x2="400" y2="336" stroke="#a8241c" stroke-width="12"/>
+    <line x1="112" y1="364" x2="400" y2="364" stroke="#a8241c" stroke-width="12"/>
+  </g>
+</svg>

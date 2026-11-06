@@ -1,5 +1,6 @@
 """Servidor de desarrollo de la web (spec 011, RF-36, RF-37; criterio 3)."""
 
+import json
 import os
 import subprocess
 import sys
@@ -126,3 +127,29 @@ def test_without_api_url_the_server_does_not_start() -> None:
 
     assert result.returncode == 1
     assert "API_URL" in result.stderr
+
+
+# --- Manifiesto (RF-28) ---
+
+
+def test_the_manifest_lets_the_app_be_pinned() -> None:
+    manifest = json.loads((serve.PUBLIC / "manifest.webmanifest").read_text())
+
+    assert manifest["name"] == manifest["short_name"] == "gastito"
+    assert manifest["lang"] == "es-CO"
+    assert manifest["display"] == "standalone"
+    assert manifest["start_url"] == "/registrar"
+    assert manifest["background_color"].startswith("#")
+    assert manifest["theme_color"].startswith("#")
+    icons = {(icon["sizes"], icon.get("purpose", "any")) for icon in manifest["icons"]}
+    assert {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")} <= icons
+    for icon in manifest["icons"]:
+        assert (serve.PUBLIC / icon["src"].lstrip("/")).is_file(), icon["src"]
+
+
+def test_the_page_links_the_manifest_and_the_iphone_icon() -> None:
+    page = INDEX.decode()
+
+    assert '<link rel="manifest" href="/manifest.webmanifest">' in page
+    assert 'rel="apple-touch-icon"' in page
+    assert (serve.PUBLIC / "icons" / "apple-touch-icon.png").is_file()
