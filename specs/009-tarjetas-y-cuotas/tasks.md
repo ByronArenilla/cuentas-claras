@@ -253,7 +253,7 @@ falla, se corrige aquí.
 - Hecho cuando: los tests pasan.
 - RF: RF-8, RF-12, RF-42 a RF-44.
 
-## [ ] T11 — ADR 0013
+## [x] T11 — ADR 0013
 `docs/adr/0013-compras-con-tarjeta-cuentan-al-pagar.md`: las compras con
 tarjeta cuentan el mes del pago (también a 1 cuota) y no en su categoría;
 la deuda cuenta sola en planeado y gastado; capital fijo con interés sobre

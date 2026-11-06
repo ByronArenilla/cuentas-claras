@@ -20,7 +20,8 @@ El plan tiene cuatro partes:
 4. **Deudas**: la sección del resumen, el estado de la tarjeta y la
    simulación.
 
-Las decisiones de fondo quedan en un ADR nuevo, el **0013**: las compras
+Las decisiones de fondo quedan en un ADR nuevo, el
+[**0013**](../../docs/adr/0013-compras-con-tarjeta-cuentan-al-pagar.md): las compras
 con tarjeta cuentan el mes del pago, las cuotas se calculan al leer y no
 se guardan, y el abono baja la cuota o el plazo.
 
