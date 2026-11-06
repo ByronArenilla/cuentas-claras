@@ -234,7 +234,7 @@ ampliados.
 - Hecho cuando: los tests pasan.
 - RF: RF-40, RF-41.
 
-## [ ] T10 — Aislamiento y ciclo de vida
+## [x] T10 — Aislamiento y ciclo de vida
 `test_isolation.py`: amplía los criterios con tarjetas, compras con
 tarjeta, abonos, pagar todo, extractos, estado y simulación. Si T3 a T9
 están bien hechas, no debería hacer falta código nuevo; si algún test

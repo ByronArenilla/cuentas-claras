@@ -1,8 +1,9 @@
 """Tests que cuidan el principio 5: dos espacios nunca ven los datos del otro.
 
 Los datos observables son los propios espacios, sus membresías (plan 001),
-sus categorías (spec 002), sus gastos (spec 003), y su plan del mes y su
-resumen (spec 008: rubros, ingresos, copia y categorías eliminadas).
+sus categorías (spec 002), sus gastos (spec 003), su plan del mes y su
+resumen (spec 008: rubros, ingresos, copia y categorías eliminadas), y sus
+tarjetas con sus compras, abonos y extractos (spec 009).
 """
 
 import importlib
@@ -19,7 +20,16 @@ from sqlalchemy.orm import Session
 
 from app import dates, routers
 from app.deps import member_space
-from app.models import BudgetItem, Category, Expense, Income, User
+from app.models import (
+    BudgetItem,
+    Card,
+    CardStatement,
+    Category,
+    Expense,
+    Income,
+    Prepayment,
+    User,
+)
 from app.models import Session as SessionRow
 
 Login = Callable[..., dict[str, str]]
@@ -629,3 +639,235 @@ def test_the_plan_stays_when_a_member_leaves(
         800_000,
         30_000,
     )
+
+
+# --- Tarjetas, abonos y extractos (spec 009) ---
+
+# 1 de diciembre de 2026 a mediodía en Bogotá.
+DECEMBER_1 = datetime(2026, 12, 1, 17, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def december(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dates, "now", lambda: DECEMBER_1)
+
+
+class CardSpace:
+    """La Visa del espacio con la "Compra TV" a 6 cuotas, un valor real del
+    extracto en diciembre y un abono en diciembre: deuda de 831.500."""
+
+    def __init__(
+        self, client: TestClient, headers: dict[str, str], space_id: int
+    ) -> None:
+        self.space_id = space_id
+        base = f"/spaces/{space_id}"
+        category = client.get(f"{base}/categories", headers=headers).json()[0]["id"]
+        self.card = client.post(
+            f"{base}/cards",
+            json={"name": "Visa", "cutoff_day": 25, "due_day": 10, "monthly_rate": 1.9},
+            headers=headers,
+        ).json()
+        self.purchase = client.post(
+            f"{base}/expenses",
+            json={
+                "payment_type": "credit",
+                "card_id": self.card["id"],
+                "category_id": category,
+                "description": "Compra TV",
+                "amount": 1_200_000,
+                "installments": 6,
+                "spent_on": "2026-11-12",
+            },
+            headers=headers,
+        ).json()
+        client.put(
+            f"{base}/cards/{self.card['id']}/statements/2026-12",
+            json={"amount": 431_500},
+            headers=headers,
+        ).raise_for_status()
+        self.prepayment = client.post(
+            f"{base}/expenses/{self.purchase['id']}/prepayments",
+            json={"amount": 400_000, "period": "2026-12", "reduces": "term"},
+            headers=headers,
+        ).json()["prepayment"]
+
+
+def december_debts(
+    client: TestClient, headers: dict[str, str], space_id: int
+) -> list[tuple[int, int]]:
+    response = client.get(
+        f"/spaces/{space_id}/summary", params={"period": "2026-12"}, headers=headers
+    )
+    assert response.status_code == 200
+    return [(debt["card_id"], debt["amount"]) for debt in response.json()["debts"]]
+
+
+def count_card_data(engine: Engine, space_id: int) -> tuple[int, int, int]:
+    with Session(engine) as db:
+        return tuple(
+            db.scalar(select(func.count()).where(model.space_id == space_id))
+            for model in (Card, Prepayment, CardStatement)
+        )
+
+
+def card_operations(
+    client: TestClient, headers: dict[str, str], base: str, foreign: "CardSpace"
+) -> dict[str, object]:
+    """Cada operación sobre la tarjeta, la compra y el abono de `foreign`,
+    por la ruta de `base`."""
+    card = f"{base}/cards/{foreign.card['id']}"
+    expense = f"{base}/expenses/{foreign.purchase['id']}"
+    return {
+        "editar tarjeta": client.patch(card, json={"cutoff_day": 1}, headers=headers),
+        "eliminar tarjeta": client.delete(card, headers=headers),
+        "estado": client.get(f"{card}/status", headers=headers),
+        "simular": client.post(f"{card}/simulate", json={"amount": 1}, headers=headers),
+        "escribir extracto": client.put(
+            f"{card}/statements/2026-12", json={"amount": 1}, headers=headers
+        ),
+        "quitar extracto": client.delete(f"{card}/statements/2026-12", headers=headers),
+        "pagar todo": client.post(
+            f"{card}/payoff", json={"period": "2026-12"}, headers=headers
+        ),
+        "plan de cuotas": client.get(f"{expense}/installments", headers=headers),
+        "abonar": client.post(
+            f"{expense}/prepayments",
+            json={"amount": 1, "period": "2027-01", "reduces": "term"},
+            headers=headers,
+        ),
+        "borrar abono": client.delete(
+            f"{expense}/prepayments/{foreign.prepayment['id']}",
+            params={"confirm": "true"},
+            headers=headers,
+        ),
+    }
+
+
+@pytest.mark.usefixtures("december")
+def test_users_in_different_spaces_cannot_touch_each_others_cards(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # Criterio 12 de la 009 (RF-8, RF-42, RF-43).
+    ana, bea = login("ana@example.com"), login("bea@example.com")
+    spaces_of = {
+        "ana": CardSpace(client, ana, personal(client, ana)),
+        "bea": CardSpace(client, bea, personal(client, bea)),
+    }
+
+    for headers, own, foreign in (
+        (ana, spaces_of["ana"], spaces_of["bea"]),
+        (bea, spaces_of["bea"], spaces_of["ana"]),
+    ):
+        foreign_base = f"/spaces/{foreign.space_id}"
+        by_foreign_route = {
+            **card_operations(client, headers, foreign_base, foreign),
+            "crear tarjeta": client.post(
+                f"{foreign_base}/cards",
+                json={"name": "X", "cutoff_day": 1, "due_day": 2},
+                headers=headers,
+            ),
+            "listar tarjetas": client.get(f"{foreign_base}/cards", headers=headers),
+        }
+        for operation, response in by_foreign_route.items():
+            assert response.status_code == 404, operation
+            assert response.json()["detail"] == "Espacio no encontrado.", operation
+
+        # Lo ajeno tampoco se alcanza desde la ruta del espacio propio.
+        own_route = card_operations(client, headers, f"/spaces/{own.space_id}", foreign)
+        for operation, response in own_route.items():
+            assert response.status_code == 404, operation
+            assert response.json()["detail"] in (
+                "Tarjeta no encontrada.",
+                "Gasto no encontrado.",
+            ), operation
+        own_prepayment = client.delete(
+            f"/spaces/{own.space_id}/expenses/{own.purchase['id']}"
+            f"/prepayments/{foreign.prepayment['id']}",
+            params={"confirm": "true"},
+            headers=headers,
+        )
+        assert own_prepayment.json()["detail"] == "Abono no encontrado."
+
+    # Nada cambió y cada resumen solo trae sus propias deudas.
+    for name, headers in (("ana", ana), ("bea", bea)):
+        own = spaces_of[name]
+        assert count_card_data(engine, own.space_id) == (1, 1, 1)
+        assert december_debts(client, headers, own.space_id) == [
+            (own.card["id"], 831_500)
+        ]
+        cards = client.get(f"/spaces/{own.space_id}/cards", headers=headers).json()
+        assert [card["id"] for card in cards] == [own.card["id"]]
+
+
+@pytest.mark.usefixtures("december")
+def test_a_card_of_space_b_cannot_be_used_in_space_a(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-12, RF-43: Ana es miembro de los dos espacios, pero la tarjeta es de
+    # Viajes.
+    ana = login("ana@example.com")
+    casa = create_space(client, ana, "Casa")
+    viajes = CardSpace(client, ana, create_space(client, ana, "Viajes"))
+    category = client.get(f"/spaces/{casa}/categories", headers=ana).json()[0]["id"]
+    body = {
+        "payment_type": "credit",
+        "card_id": viajes.card["id"],
+        "category_id": category,
+        "description": "Hotel",
+        "amount": 10_000,
+    }
+
+    created = client.post(f"/spaces/{casa}/expenses", json=body, headers=ana)
+    debit = client.post(
+        f"/spaces/{casa}/expenses",
+        json={"amount": 10_000, "payment_type": "debit", "category_id": category},
+        headers=ana,
+    ).json()
+    moved = client.patch(
+        f"/spaces/{casa}/expenses/{debit['id']}",
+        json={
+            "payment_type": "credit",
+            "card_id": viajes.card["id"],
+            "description": "Hotel",
+        },
+        headers=ana,
+    )
+
+    for rejected in (created, moved):
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"] == "La tarjeta no existe en este espacio."
+    assert count_expenses(engine, casa) == 1
+    assert december_debts(client, ana, casa) == []
+
+
+@pytest.mark.usefixtures("december")
+def test_deleting_a_space_deletes_only_its_cards(
+    client: TestClient, engine: Engine, login: Login
+) -> None:
+    # RF-44: mismo usuario, dos espacios, con compras, abonos y extractos.
+    ana = login("ana@example.com")
+    casa = CardSpace(client, ana, create_space(client, ana, "Casa"))
+    viajes = CardSpace(client, ana, create_space(client, ana, "Viajes"))
+
+    response = client.delete(
+        f"/spaces/{viajes.space_id}", params={"confirm": "Viajes"}, headers=ana
+    )
+
+    assert response.status_code == 204
+    assert count_card_data(engine, viajes.space_id) == (0, 0, 0)
+    assert count_card_data(engine, casa.space_id) == (1, 1, 1)
+    assert december_debts(client, ana, casa.space_id) == [(casa.card["id"], 831_500)]
+
+
+@pytest.mark.usefixtures("december")
+def test_cards_stay_when_a_member_leaves(
+    client: TestClient, shared_space: SharedSpace
+) -> None:
+    # RF-44: lo que registró Bea sigue en el resumen de Ana.
+    space_id, ana, bea = shared_space
+    bea_cards = CardSpace(client, bea, space_id)
+
+    response = client.delete(f"/spaces/{space_id}/members/me", headers=bea)
+
+    assert response.status_code == 204
+    assert december_debts(client, ana, space_id) == [(bea_cards.card["id"], 831_500)]
