@@ -41,7 +41,7 @@
   verde.
 - RF: RF-1 a RF-5.
 
-## [ ] T3 — Resumen: gastos del mes, deuda y a pagar
+## [x] T3 — Resumen: gastos del mes, deuda y a pagar
 `spent_by_category`, `CardMonth` con gastos del mes y a pagar, Deudas y
 totales.
 

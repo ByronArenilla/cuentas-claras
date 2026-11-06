@@ -629,6 +629,9 @@ class TotalSummaryOut(BaseModel):
     planned: int
     # Deudas de todas las tarjetas en el mes (spec 009, RF-35).
     debts: int
+    # Lo que hay que pagar a todas las tarjetas, aparte: no suma en planeado
+    # ni en gastado (spec 010, RF-9).
+    cards_to_pay: int
     spent_planned: int
     spent_unplanned: int
     # Desde la 009: gastado en rubros más no planeado más las deudas (RF-38).
@@ -658,8 +661,19 @@ class DebtPrepaymentOut(BaseModel):
     amount: int
 
 
+class MonthExpenseOut(BaseModel):
+    """Gasto del mes con tarjeta que se paga en el mes (spec 010, RF-8): ya
+    contó en el mes de la compra."""
+
+    expense_id: int
+    # Descripción, rubro o categoría (RF-10 de la 010).
+    name: str
+    amount: int
+
+
 class CardDebtOut(BaseModel):
-    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36)."""
+    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36) y lo que hay
+    que pagarle (spec 010, RF-8)."""
 
     card_id: int
     name: str
@@ -671,8 +685,12 @@ class CardDebtOut(BaseModel):
     estimated: int
     # Valor real del extracto, o nulo si no se escribió.
     statement: int | None
-    # El valor real o lo estimado, más los abonos del mes.
+    # Deuda del mes: lo estimado o, con valor real, ese valor menos los gastos
+    # del mes; más los abonos (RF-7 de la 010).
     amount: int
+    month_expenses: list[MonthExpenseOut]
+    # Lo que hay que pagarle a la tarjeta en el mes (RF-8 de la 010).
+    to_pay: int
 
 
 class SummaryOut(BaseModel):
