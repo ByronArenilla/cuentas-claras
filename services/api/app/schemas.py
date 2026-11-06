@@ -593,13 +593,54 @@ class CategorySummaryOut(BaseModel):
 
 class TotalSummaryOut(BaseModel):
     income: int
+    # Desde la 009: lo planeado en rubros más las deudas del mes (RF-38).
     planned: int
+    # Deudas de todas las tarjetas en el mes (spec 009, RF-35).
+    debts: int
     spent_planned: int
     spent_unplanned: int
+    # Desde la 009: gastado en rubros más no planeado más las deudas (RF-38).
     spent: int
     # Ingresos menos planeado, y ingresos menos gastado: pueden ser negativos.
     unassigned: int
     balance: int
+
+
+class DebtInstallmentOut(BaseModel):
+    """Cuota de una compra que se paga en el mes (spec 009, RF-36)."""
+
+    expense_id: int
+    # La descripción de la compra (decisión 23).
+    name: str
+    number: int
+    count: int
+    capital: int
+    interest: int
+    amount: int
+
+
+class DebtPrepaymentOut(BaseModel):
+    id: int
+    expense_id: int
+    name: str
+    amount: int
+
+
+class CardDebtOut(BaseModel):
+    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36)."""
+
+    card_id: int
+    name: str
+    # Una archivada sale si tiene algo en el mes (decisión 21).
+    deleted: bool
+    installments: list[DebtInstallmentOut]
+    prepayments: list[DebtPrepaymentOut]
+    # Suma de las cuotas del mes, con intereses estimados.
+    estimated: int
+    # Valor real del extracto, o nulo si no se escribió.
+    statement: int | None
+    # El valor real o lo estimado, más los abonos del mes.
+    amount: int
 
 
 class SummaryOut(BaseModel):
@@ -607,6 +648,9 @@ class SummaryOut(BaseModel):
     incomes: list[IncomeSummaryOut]
     budget_items: list[ItemSummaryOut]
     categories: list[CategorySummaryOut]
+    # Spec 009: una entrada por tarjeta con cuotas, abonos o valor real en el
+    # mes (RF-36).
+    debts: list[CardDebtOut]
     total: TotalSummaryOut
 
 

@@ -21,6 +21,7 @@ from app.installments import (
     prepayment_limit,
 )
 from app.models import Card, CardStatement, Expense, Prepayment
+from app.schemas import CardDebtOut, DebtInstallmentOut, DebtPrepaymentOut
 
 
 def purchase_prepayments(db: Session, expense: Expense) -> list[Prepayment]:
@@ -232,3 +233,49 @@ def pay_off(db: Session, card: Card, period: str, user_id: int) -> list[Prepayme
     ]
     db.add_all(created)
     return created
+
+
+# --- Deudas del resumen (RF-36) ---
+
+
+def card_debts(db: Session, space_id: int, period: str) -> list[CardDebtOut]:
+    """Deuda de cada tarjeta del espacio, activa o archivada, que tenga
+    cuotas, abonos o valor real en `period` (RF-36, decisión 21)."""
+    cards = db.scalars(select(Card).where(Card.space_id == space_id).order_by(Card.id))
+    debts = []
+    for card in cards:
+        month = card_month(db, card, period)
+        if month.is_empty:
+            continue
+        debts.append(
+            CardDebtOut(
+                card_id=card.id,
+                name=card.name,
+                deleted=card.deleted_at is not None,
+                installments=[
+                    DebtInstallmentOut(
+                        expense_id=purchase.id,
+                        name=purchase.description or "",
+                        number=row.number,
+                        count=row.count,
+                        capital=row.capital,
+                        interest=row.interest,
+                        amount=row.amount,
+                    )
+                    for purchase, row in month.installments
+                ],
+                prepayments=[
+                    DebtPrepaymentOut(
+                        id=prepayment.id,
+                        expense_id=purchase.id,
+                        name=purchase.description or "",
+                        amount=prepayment.amount,
+                    )
+                    for purchase, prepayment in month.prepayments
+                ],
+                estimated=month.estimated,
+                statement=month.statement,
+                amount=month.amount,
+            )
+        )
+    return debts

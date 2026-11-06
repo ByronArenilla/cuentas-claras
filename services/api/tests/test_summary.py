@@ -3,10 +3,23 @@
 from datetime import date
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.models import BudgetItem, Category, Expense, Income, Space, User, utc_now
+from app import dates
+from app.debts import pay_off
+from app.models import (
+    BudgetItem,
+    Card,
+    CardStatement,
+    Category,
+    Expense,
+    Income,
+    Prepayment,
+    Space,
+    User,
+    utc_now,
+)
 from app.summary import build_summary, spent_by_category, spent_by_item
 
 NOVEMBER = (date(2026, 11, 1), date(2026, 12, 1))
@@ -215,6 +228,7 @@ def test_the_summary_of_the_month(
     assert summary["total"] == {
         "income": 5_000_000,
         "planned": 2_300_000,
+        "debts": 0,
         "spent_planned": 2_312_000,
         "spent_unplanned": 48_000,
         "spent": 2_360_000,
@@ -268,6 +282,7 @@ def test_a_month_without_plan_is_empty_and_creates_nothing(
     assert summary["total"] == {
         "income": 0,
         "planned": 0,
+        "debts": 0,
         "spent_planned": 0,
         "spent_unplanned": 0,
         "spent": 0,
@@ -351,3 +366,315 @@ def test_nothing_from_another_space_is_counted(
     assert summary.total.income == 5_000_000
     assert summary.total.planned == 2_300_000
     assert summary.total.spent == 2_360_000
+
+
+# --- Deudas (spec 009, RF-34 a RF-39) ---
+
+DECEMBER = date(2026, 12, 1)
+
+
+def add_card(session: Session, space: Space, **fields: object) -> Card:
+    card = Card(
+        **{
+            "space_id": space.id,
+            "name": "Visa",
+            "cutoff_day": 25,
+            "due_day": 10,
+            "monthly_rate_bp": 190,
+            **fields,
+        }
+    )
+    session.add(card)
+    session.flush()
+    return card
+
+
+def buy(
+    session: Session,
+    user: User,
+    card: Card,
+    category: Category,
+    description: str | None,
+    amount: int,
+    day: date,
+    installments: int = 1,
+) -> Expense:
+    """Compra con tarjeta, con el mes de pago que da la regla de la 009."""
+    period = dates.first_due_period(day, card.cutoff_day, card.due_day)
+    expense = Expense(
+        space_id=card.space_id,
+        category_id=category.id,
+        created_by=user.id,
+        amount=amount,
+        payment_type="credit",
+        spent_on=day,
+        description=description,
+        card_id=card.id,
+        installments=installments,
+        first_due_start=dates.period_bounds(period)[0],
+    )
+    session.add(expense)
+    session.flush()
+    return expense
+
+
+def prepay(
+    session: Session, user: User, purchase: Expense, amount: int, month: date
+) -> Prepayment:
+    prepayment = Prepayment(
+        space_id=purchase.space_id,
+        expense_id=purchase.id,
+        period_start=month,
+        amount=amount,
+        reduces="term",
+        created_by=user.id,
+    )
+    session.add(prepayment)
+    session.flush()
+    return prepayment
+
+
+def write_statement(session: Session, card: Card, amount: int, month: date) -> None:
+    session.add(
+        CardStatement(
+            space_id=card.space_id, card_id=card.id, period_start=month, amount=amount
+        )
+    )
+    session.flush()
+
+
+@pytest.fixture
+def visa(session: Session, space: Space, user: User) -> dict:
+    """Criterio 4: la Visa, el ingreso "Salario" de diciembre, el rubro
+    "Arriendo" de diciembre pagado con débito, un "Mercado" de 200.000 a 1
+    cuota el 5 de noviembre y la "Compra TV" a 6 cuotas el 12."""
+    hogar = add_category(session, space, "Hogar")
+    comida = add_category(session, space, "Comida")
+    card = add_card(session, space)
+    add_income(session, space, "Salario", 5_000_000, DECEMBER)
+    arriendo = add_item(session, hogar, "Arriendo", 1_500_000, DECEMBER)
+    spend(session, user, 1_500_000, date(2026, 12, 1), item=arriendo)
+    mercado = buy(session, user, card, comida, "Mercado", 200_000, date(2026, 11, 5))
+    tv = buy(session, user, card, hogar, "Compra TV", 1_200_000, date(2026, 11, 12), 6)
+    return {
+        "card": card,
+        "hogar": hogar,
+        "comida": comida,
+        "mercado": mercado,
+        "tv": tv,
+    }
+
+
+def test_card_purchases_do_not_count_in_their_month(
+    session: Session, space: Space, visa: dict
+) -> None:
+    # Criterio 4: en noviembre ninguna de las dos compras suma (RF-37).
+    summary = build_summary(session, space.id, "2026-11")
+
+    assert summary.debts == []
+    assert all(row.spent == 0 for row in summary.categories)
+    assert summary.total.spent == 0
+    assert summary.total.debts == 0
+
+
+def test_december_debts_of_the_visa(session: Session, space: Space, visa: dict) -> None:
+    # Criterio 4 (RF-34 a RF-38).
+    summary = build_summary(session, space.id, "2026-12").model_dump()
+
+    assert summary["debts"] == [
+        {
+            "card_id": visa["card"].id,
+            "name": "Visa",
+            "deleted": False,
+            "installments": [
+                {
+                    "expense_id": visa["mercado"].id,
+                    "name": "Mercado",
+                    "number": 1,
+                    "count": 1,
+                    "capital": 200_000,
+                    "interest": 0,
+                    "amount": 200_000,
+                },
+                {
+                    "expense_id": visa["tv"].id,
+                    "name": "Compra TV",
+                    "number": 1,
+                    "count": 6,
+                    "capital": 200_000,
+                    "interest": 22_800,
+                    "amount": 222_800,
+                },
+            ],
+            "prepayments": [],
+            "estimated": 422_800,
+            "statement": None,
+            "amount": 422_800,
+        }
+    ]
+    hogar = next(row for row in summary["categories"] if row["name"] == "Hogar")
+    assert hogar["spent"] == 1_500_000
+    assert summary["total"] == {
+        "income": 5_000_000,
+        "planned": 1_922_800,
+        "debts": 422_800,
+        "spent_planned": 1_500_000,
+        "spent_unplanned": 0,
+        "spent": 1_922_800,
+        "unassigned": 3_077_200,
+        "balance": 3_077_200,
+    }
+
+
+def test_statement_and_prepayments_change_the_debt(
+    session: Session, space: Space, user: User, visa: dict
+) -> None:
+    write_statement(session, visa["card"], 431_500, DECEMBER)
+    assert build_summary(session, space.id, "2026-12").total.debts == 431_500
+
+    prepay(session, user, visa["tv"], 400_000, DECEMBER)
+    summary = build_summary(session, space.id, "2026-12")
+    [debt] = summary.debts
+    assert debt.statement == 431_500
+    assert debt.estimated == 422_800
+    assert [(row.name, row.amount) for row in debt.prepayments] == [
+        ("Compra TV", 400_000)
+    ]
+    assert debt.amount == 831_500
+
+    session.execute(delete(CardStatement))
+    assert build_summary(session, space.id, "2026-12").total.debts == 822_800
+
+
+def test_a_legacy_credit_expense_counts_until_it_gets_a_card(
+    session: Session, space: Space, user: User, visa: dict
+) -> None:
+    # Criterio 5, parte del resumen (RF-17, RF-37).
+    mercado = add_item(session, visa["comida"], "Mercado", 800_000)
+    legacy = Expense(
+        space_id=space.id,
+        category_id=visa["comida"].id,
+        budget_item_id=mercado.id,
+        created_by=user.id,
+        amount=90_000,
+        payment_type="credit",
+        spent_on=date(2026, 11, 2),
+    )
+    session.add(legacy)
+    session.flush()
+    november = build_summary(session, space.id, "2026-11")
+    assert november.budget_items[0].spent == 90_000
+    assert november.total.spent == 90_000
+
+    legacy.budget_item_id = None
+    legacy.card_id = visa["card"].id
+    legacy.installments = 1
+    legacy.first_due_start = DECEMBER
+    session.flush()
+
+    assert build_summary(session, space.id, "2026-11").total.spent == 0
+    december = build_summary(session, space.id, "2026-12")
+    assert december.total.debts == 422_800 + 90_000
+
+
+def test_an_archived_card_still_shows_its_debts(
+    session: Session, space: Space, visa: dict
+) -> None:
+    # Criterio 7, parte del resumen (decisión 21).
+    visa["card"].deleted_at = utc_now()
+    session.flush()
+
+    [debt] = build_summary(session, space.id, "2026-12").debts
+
+    assert debt.deleted is True
+    assert debt.amount == 422_800
+
+
+def test_a_new_rate_changes_estimates_but_not_written_statements(
+    session: Session, space: Space, visa: dict
+) -> None:
+    # Criterio 8, segunda parte (decisión 14).
+    write_statement(session, visa["card"], 431_500, DECEMBER)
+    visa["card"].monthly_rate_bp = 200
+    session.flush()
+
+    december = build_summary(session, space.id, "2026-12")
+    january = build_summary(session, space.id, "2027-01")
+
+    assert december.total.debts == 431_500
+    # Cuota 2 de la TV: 200.000 + 1.000.000 × 2 %.
+    assert january.total.debts == 220_000
+
+
+def test_a_card_with_only_a_statement_shows_up(session: Session, space: Space) -> None:
+    # Un mes sin cuotas pero con cuota de manejo en el extracto.
+    card = add_card(session, space)
+    write_statement(session, card, 15_000, date(2027, 3, 1))
+
+    [debt] = build_summary(session, space.id, "2027-03").debts
+
+    assert (debt.installments, debt.estimated, debt.amount) == ([], 0, 15_000)
+
+
+def test_paying_off_leaves_only_purchases_after_the_cutoff(
+    session: Session, space: Space, user: User, visa: dict
+) -> None:
+    # Criterio 13, parte del resumen (RF-29, RF-30).
+    buy(
+        session,
+        user,
+        visa["card"],
+        visa["hogar"],
+        "Zapatos",
+        150_000,
+        date(2026, 11, 30),
+    )
+    pay_off(session, visa["card"], "2026-12", user.id)
+    session.flush()
+
+    december = build_summary(session, space.id, "2026-12")
+    [january] = build_summary(session, space.id, "2027-01").debts
+
+    assert december.total.debts == 1_422_800
+    assert [
+        (row.name, row.number, row.count, row.amount) for row in january.installments
+    ] == [("Zapatos", 1, 1, 150_000)]
+    assert january.amount == 150_000
+
+
+def test_a_month_without_debts_and_amounts_are_ints(
+    session: Session, space: Space, visa: dict
+) -> None:
+    empty = build_summary(session, space.id, "2028-01")
+    assert empty.debts == []
+    assert empty.total.debts == 0
+
+    summary = build_summary(session, space.id, "2026-12").model_dump()
+    [debt] = summary["debts"]
+    amounts = [
+        debt["estimated"],
+        debt["amount"],
+        *[
+            row[key]
+            for row in debt["installments"]
+            for key in ("capital", "interest", "amount")
+        ],
+        *summary["total"].values(),
+    ]
+    assert all(type(amount) is int for amount in amounts)
+
+
+def test_the_summary_creates_nothing(
+    session: Session, space: Space, visa: dict
+) -> None:
+    counts = [
+        session.scalar(select(func.count()).select_from(model))
+        for model in (Expense, Prepayment, CardStatement)
+    ]
+
+    build_summary(session, space.id, "2026-12")
+
+    assert [
+        session.scalar(select(func.count()).select_from(model))
+        for model in (Expense, Prepayment, CardStatement)
+    ] == counts

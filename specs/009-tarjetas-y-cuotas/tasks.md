@@ -188,7 +188,7 @@ una compra con abonos.
 - Hecho cuando: los tests pasan.
 - RF: RF-29, RF-30.
 
-## [ ] T8 — Deudas en el resumen
+## [x] T8 — Deudas en el resumen
 `debts.card_debts`; `summary.py` con Deudas, `spent_by_category` sin
 compras con tarjeta y los totales nuevos; `SummaryOut` y `TotalSummaryOut`
 ampliados.
