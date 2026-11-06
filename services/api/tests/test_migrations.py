@@ -17,7 +17,7 @@ from app.db import MigrationError, build_engine, run_migrations
 from app.models import Base
 from tests import old_schemas
 
-HEAD = "0003"
+HEAD = "0004"
 
 
 @pytest.fixture
@@ -296,3 +296,66 @@ def test_a_database_without_budgets_converts_nothing(file_engine: Engine) -> Non
 
     assert rows(file_engine, "SELECT COUNT(*) FROM budget_items") == [(0,)]
     assert "budgets" not in tables(file_engine)
+
+
+# --- Tarjetas y cuotas (spec 009, RF-45) ---
+
+
+def test_existing_expenses_stay_without_card(file_engine: Engine) -> None:
+    # Criterio 11 de la 009: los gastos a crédito y a débito que ya existían
+    # quedan iguales y sin tarjeta (decisión 8).
+    execute(
+        file_engine,
+        old_schemas.SCHEMA_007
+        + old_schemas.BASE_ROWS
+        + [
+            "INSERT INTO expenses (id, space_id, category_id, created_by, amount,"
+            " payment_type, spent_on, description, created_at)"
+            " VALUES (2, 1, 1, 1, 90000, 'credit', '2026-10-02', NULL,"
+            " '2026-10-02 18:00:00')"
+        ],
+    )
+    columns = preserved_columns(file_engine)
+    before = snapshot(file_engine, columns)
+
+    run_migrations(file_engine)
+
+    assert snapshot(file_engine, columns) == before
+    assert rows(
+        file_engine,
+        "SELECT id, payment_type, card_id, installments, first_due_start"
+        " FROM expenses ORDER BY id",
+    ) == [(1, "debit", None, None, None), (2, "credit", None, None, None)]
+    assert {"cards", "card_statements", "prepayments"} <= tables(file_engine)
+    assert schema_diff(file_engine) == []
+
+
+def test_the_expenses_table_checks_the_shape_of_a_card_purchase(
+    file_engine: Engine,
+) -> None:
+    # `compare_metadata` no compara las CHECK: se prueba que la copia de
+    # `expenses` que hace la 0004 en SQLite rechaza una compra mal formada.
+    execute(file_engine, old_schemas.SCHEMA_007 + old_schemas.BASE_ROWS)
+    run_migrations(file_engine)
+    execute(
+        file_engine,
+        [
+            "INSERT INTO cards (id, space_id, name, name_key, cutoff_day, due_day,"
+            " created_at) VALUES (1, 1, 'Visa', 'visa', 25, 10, '2026-11-01 10:00:00')"
+        ],
+    )
+    insert = (
+        "INSERT INTO expenses (space_id, category_id, created_by, amount,"
+        " payment_type, spent_on, created_at, card_id, installments,"
+        " first_due_start) VALUES (1, 1, 1, 20000, '{payment_type}', '2026-11-12',"
+        " '2026-11-12 10:00:00', 1, {installments}, '2026-12-01')"
+    )
+
+    for payment_type, installments in (("debit", 1), ("credit", 49)):
+        with pytest.raises(IntegrityError):
+            execute(
+                file_engine,
+                [insert.format(payment_type=payment_type, installments=installments)],
+            )
+    execute(file_engine, [insert.format(payment_type="credit", installments=6)])
+    assert rows(file_engine, "SELECT COUNT(*) FROM expenses") == [(2,)]

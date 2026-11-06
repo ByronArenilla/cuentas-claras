@@ -7,11 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     BudgetItem,
+    Card,
+    CardStatement,
     Category,
     Expense,
     Income,
     Invitation,
     Membership,
+    Prepayment,
     Space,
     User,
     category_key,
@@ -454,4 +457,295 @@ def test_deleting_space_cascades_to_items_incomes_and_linked_expenses(
 
     assert session.scalars(select(BudgetItem.space_id)).all() == [kept.id]
     assert session.scalars(select(Income.space_id)).all() == [kept.id]
+    assert set(session.scalars(select(Expense.space_id)).all()) == {kept.id}
+
+
+# --- Tarjetas, compras con tarjeta, abonos y extractos (spec 009) ---
+
+
+def make_card(session: Session, space: Space, **fields: object) -> Card:
+    """Tarjeta "Visa" con corte 25, pago 10 y tasa 1,90 %, salvo otro dato."""
+    values: dict[str, object] = {
+        "space_id": space.id,
+        "name": "Visa",
+        "cutoff_day": 25,
+        "due_day": 10,
+        "monthly_rate_bp": 190,
+        **fields,
+    }
+    card = Card(**values)
+    session.add(card)
+    session.flush()
+    return card
+
+
+def make_purchase(
+    session: Session, space: Space, user: User, card: Card, **fields: object
+) -> Expense:
+    """Compra con tarjeta "Compra TV" a 6 cuotas, con primera cuota en 2026-12."""
+    values: dict[str, object] = {
+        "payment_type": "credit",
+        "card_id": card.id,
+        "installments": 6,
+        "first_due_start": date(2026, 12, 1),
+        "amount": 1_200_000,
+        "spent_on": date(2026, 11, 12),
+        "description": "Compra TV",
+        **fields,
+    }
+    return make_expense(session, space, user, **values)
+
+
+def test_card_is_saved_with_its_name_key(session: Session) -> None:
+    card = make_card(session, make_space(session), name="Visa Éxito")
+    session.expire_all()
+
+    saved = session.get(Card, card.id)
+    assert saved.name_key == "visa exito"
+    assert saved.monthly_rate_bp == 190
+    assert saved.deleted_at is None
+
+
+def test_card_rate_is_optional(session: Session) -> None:
+    card = make_card(session, make_space(session), monthly_rate_bp=None)
+    session.expire_all()
+
+    assert session.get(Card, card.id).monthly_rate_bp is None
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"cutoff_day": 0},
+        {"cutoff_day": 32},
+        {"due_day": 0},
+        {"due_day": 32},
+        {"monthly_rate_bp": 0},
+        {"monthly_rate_bp": 1001},
+    ],
+)
+def test_database_rejects_invalid_card_days_and_rate(
+    session: Session, fields: dict[str, object]
+) -> None:
+    with pytest.raises(IntegrityError):
+        make_card(session, make_space(session), **fields)
+
+
+def test_equivalent_card_names_clash_in_the_same_space(session: Session) -> None:
+    space = make_space(session)
+    make_card(session, space, name="Visa")
+
+    with pytest.raises(IntegrityError):
+        make_card(session, space, name=" VISA ")
+
+
+def test_same_card_name_is_allowed_in_another_space(session: Session) -> None:
+    make_card(session, make_space(session, "Casa"))
+    make_card(session, make_space(session, "Viajes"))
+
+    assert len(session.scalars(select(Card)).all()) == 2
+
+
+def test_card_purchase_is_saved_and_read_back(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    purchase = make_purchase(session, space, user, make_card(session, space))
+    session.expire_all()
+
+    saved = session.get(Expense, purchase.id)
+    assert saved.installments == 6
+    assert saved.first_due_start == date(2026, 12, 1)
+
+
+def test_expense_without_card_has_no_card_fields(session: Session) -> None:
+    expense = make_expense(session, make_space(session), make_user(session))
+    session.expire_all()
+
+    saved = session.get(Expense, expense.id)
+    assert (saved.card_id, saved.installments, saved.first_due_start) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"payment_type": "debit"},
+        {"installments": None},
+        {"installments": 0},
+        {"installments": 49},
+        {"first_due_start": None},
+    ],
+)
+def test_database_rejects_a_malformed_card_purchase(
+    session: Session, fields: dict[str, object]
+) -> None:
+    user, space = make_user(session), make_space(session)
+    card = make_card(session, space)
+
+    with pytest.raises(IntegrityError):
+        make_purchase(session, space, user, card, **fields)
+
+
+def test_database_rejects_a_card_purchase_with_a_budget_item(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    card = make_card(session, space)
+    item = make_item(session, make_category(session, space, "Hogar"))
+
+    with pytest.raises(IntegrityError):
+        make_purchase(session, space, user, card, budget_item_id=item.id)
+
+
+@pytest.mark.parametrize(
+    "fields", [{"installments": 1}, {"first_due_start": date(2026, 12, 1)}]
+)
+def test_database_rejects_card_fields_without_a_card(
+    session: Session, fields: dict[str, object]
+) -> None:
+    with pytest.raises(IntegrityError):
+        make_expense(session, make_space(session), make_user(session), **fields)
+
+
+def test_prepayment_and_statement_are_saved(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    card = make_card(session, space)
+    purchase = make_purchase(session, space, user, card)
+    session.add_all(
+        [
+            Prepayment(
+                space_id=space.id,
+                expense_id=purchase.id,
+                period_start=date(2026, 12, 1),
+                amount=400_000,
+                reduces="term",
+                created_by=user.id,
+            ),
+            CardStatement(
+                space_id=space.id,
+                card_id=card.id,
+                period_start=date(2026, 12, 1),
+                amount=0,
+            ),
+        ]
+    )
+    session.flush()
+    session.expire_all()
+
+    assert session.scalars(select(Prepayment.amount)).all() == [400_000]
+    assert session.scalars(select(CardStatement.amount)).all() == [0]
+
+
+@pytest.mark.parametrize(
+    ("amount", "reduces"), [(0, "term"), (-1, "term"), (1, "plazo"), (1, "")]
+)
+def test_database_rejects_invalid_prepayments(
+    session: Session, amount: int, reduces: str
+) -> None:
+    user, space = make_user(session), make_space(session)
+    purchase = make_purchase(session, space, user, make_card(session, space))
+    session.add(
+        Prepayment(
+            space_id=space.id,
+            expense_id=purchase.id,
+            period_start=date(2026, 12, 1),
+            amount=amount,
+            reduces=reduces,
+            created_by=user.id,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_database_rejects_a_negative_statement(session: Session) -> None:
+    space = make_space(session)
+    card = make_card(session, space)
+    session.add(
+        CardStatement(
+            space_id=space.id,
+            card_id=card.id,
+            period_start=date(2026, 12, 1),
+            amount=-1,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_one_prepayment_per_purchase_and_month(session: Session) -> None:
+    user, space = make_user(session), make_space(session)
+    purchase = make_purchase(session, space, user, make_card(session, space))
+    for _ in range(2):
+        session.add(
+            Prepayment(
+                space_id=space.id,
+                expense_id=purchase.id,
+                period_start=date(2026, 12, 1),
+                amount=1,
+                reduces="term",
+                created_by=user.id,
+            )
+        )
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_one_statement_per_card_and_month(session: Session) -> None:
+    space = make_space(session)
+    card = make_card(session, space)
+    for amount in (1, 2):
+        session.add(
+            CardStatement(
+                space_id=space.id,
+                card_id=card.id,
+                period_start=date(2026, 12, 1),
+                amount=amount,
+            )
+        )
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_deleting_space_cascades_to_cards_purchases_prepayments_and_statements(
+    session: Session,
+) -> None:
+    # RF-44. Las claves foráneas sin `ON DELETE` (compra → tarjeta, abono →
+    # compra, extracto → tarjeta) se comprueban al final de la sentencia, así
+    # que la cascada no choca (plan 009).
+    user = make_user(session)
+    doomed, kept = make_space(session, "Casa"), make_space(session, "Viajes")
+    for space in (doomed, kept):
+        card = make_card(session, space)
+        purchase = make_purchase(session, space, user, card)
+        session.add_all(
+            [
+                Prepayment(
+                    space_id=space.id,
+                    expense_id=purchase.id,
+                    period_start=date(2026, 12, 1),
+                    amount=1,
+                    reduces="term",
+                    created_by=user.id,
+                ),
+                CardStatement(
+                    space_id=space.id,
+                    card_id=card.id,
+                    period_start=date(2026, 12, 1),
+                    amount=1,
+                ),
+            ]
+        )
+    session.flush()
+
+    session.execute(delete(Space).where(Space.id == doomed.id))
+    session.flush()
+
+    assert session.scalars(select(Card.space_id)).all() == [kept.id]
+    assert session.scalars(select(Prepayment.space_id)).all() == [kept.id]
+    assert session.scalars(select(CardStatement.space_id)).all() == [kept.id]
     assert set(session.scalars(select(Expense.space_id)).all()) == {kept.id}

@@ -1,5 +1,5 @@
 """Tablas de usuarios, espacios, membresías, invitaciones, sesiones, categorías,
-gastos, rubros e ingresos."""
+gastos, rubros, ingresos, tarjetas, abonos y valores del extracto."""
 
 import unicodedata
 from datetime import UTC, date, datetime
@@ -11,6 +11,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    SmallInteger,
     String,
     TypeDecorator,
     UniqueConstraint,
@@ -171,6 +173,23 @@ class Expense(Base):
         # Para cambiar o soltar los gastos de un rubro (RF-7, RF-8 de la
         # 008). PostgreSQL no indexa solas las claves foráneas.
         Index("ix_expenses_budget_item_id", "budget_item_id"),
+        # Una compra con tarjeta (spec 009) es a crédito, sin rubro, con 1 a 48
+        # cuotas y con su mes de pago; un gasto sin tarjeta no tiene ninguno
+        # de los tres datos. Última defensa si algo salta la validación.
+        # `IS NOT NULL` explícito: `NULL BETWEEN 1 AND 48` da NULL, y una CHECK
+        # que da NULL se considera cumplida.
+        CheckConstraint(
+            "(card_id IS NULL AND installments IS NULL"
+            " AND first_due_start IS NULL)"
+            " OR (card_id IS NOT NULL AND payment_type = 'credit'"
+            " AND budget_item_id IS NULL AND installments IS NOT NULL"
+            " AND installments BETWEEN 1 AND 48"
+            " AND first_due_start IS NOT NULL)",
+            name="ck_expenses_card_purchase",
+        ),
+        # Deudas busca las compras de cada tarjeta en una ventana de meses, y
+        # el estado, todas las de una tarjeta (plan 009).
+        Index("ix_expenses_card_id_first_due_start", "card_id", "first_due_start"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -198,6 +217,16 @@ class Expense(Base):
     spent_on: Mapped[date] = mapped_column(Date)
     description: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    # Compra con tarjeta (spec 009): tarjeta, número de cuotas y mes de pago de
+    # la primera cuota (día 1). Los tres son nulos en un gasto sin tarjeta.
+    # Sin `ondelete`: una tarjeta nunca se borra, se archiva (decisión 9).
+    card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cards.id", name="fk_expenses_card_id")
+    )
+    installments: Mapped[int | None] = mapped_column(SmallInteger)
+    # Se guarda al registrar: si el banco cambia los días de la tarjeta, las
+    # compras ya registradas no cambian de mes (decisión 13).
+    first_due_start: Mapped[date | None] = mapped_column(Date)
 
 
 class BudgetItem(Base):
@@ -258,3 +287,85 @@ class Income(Base):
     def _fill_name_key(self, _key: str, name: str) -> str:
         self.name_key = category_key(name)
         return name
+
+
+class Card(Base):
+    """Tarjeta de crédito del espacio (spec 009). Eliminarla la archiva: sus
+    compras, abonos y extractos la conservan (decisión 9)."""
+
+    __tablename__ = "cards"
+    __table_args__ = (
+        CheckConstraint("cutoff_day BETWEEN 1 AND 31", name="ck_cards_cutoff_day"),
+        CheckConstraint("due_day BETWEEN 1 AND 31", name="ck_cards_due_day"),
+        CheckConstraint(
+            "monthly_rate_bp IS NULL OR monthly_rate_bp BETWEEN 1 AND 1000",
+            name="ck_cards_monthly_rate_bp",
+        ),
+        # Incluye las archivadas: crear una con el nombre de una archivada la
+        # restaura, nunca hay dos con el mismo nombre (RF-2, RF-7).
+        UniqueConstraint("space_id", "name_key", name="uq_cards_name"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(50))
+    name_key: Mapped[str] = mapped_column(String)
+    cutoff_day: Mapped[int] = mapped_column(SmallInteger)
+    due_day: Mapped[int] = mapped_column(SmallInteger)
+    # Tasa mensual en puntos básicos: 1,89 % es 189. La API la recibe y la
+    # devuelve como decimal (`1.89`); aquí es un entero porque SQLite no tiene
+    # un tipo decimal exacto y guardaría un `Numeric` como `float` (plan 009).
+    monthly_rate_bp: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    @validates("name")
+    def _fill_name_key(self, _key: str, name: str) -> str:
+        self.name_key = category_key(name)
+        return name
+
+
+class CardStatement(Base):
+    """Valor real del extracto de una tarjeta en un mes (spec 009, RF-31).
+    Reemplaza la deuda estimada de ese mes."""
+
+    __tablename__ = "card_statements"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_card_statements_amount"),
+        UniqueConstraint("card_id", "period_start", name="uq_card_statements_period"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    card_id: Mapped[int] = mapped_column(ForeignKey("cards.id"))
+    period_start: Mapped[date] = mapped_column(Date)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime, default=utc_now, onupdate=utc_now
+    )
+
+
+class Prepayment(Base):
+    """Abono a una compra con tarjeta en un mes, además de su cuota (spec 009,
+    decisión 7). Baja la cuota (`installment`) o el plazo (`term`)."""
+
+    __tablename__ = "prepayments"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_prepayments_amount_positive"),
+        CheckConstraint(
+            "reduces IN ('installment', 'term')", name="ck_prepayments_reduces"
+        ),
+        # Un abono por compra y mes (decisión 18), aunque lleguen dos a la vez.
+        UniqueConstraint("expense_id", "period_start", name="uq_prepayments_period"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    space_id: Mapped[int] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"))
+    # Sin `ondelete`: una compra con abonos no se borra (RF-16), y borrar el
+    # espacio quita gastos y abonos en la misma sentencia (plan 003).
+    expense_id: Mapped[int] = mapped_column(ForeignKey("expenses.id"))
+    period_start: Mapped[date] = mapped_column(Date)
+    amount: Mapped[int] = mapped_column(BigInteger)
+    reduces: Mapped[str] = mapped_column(String(11))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utc_now)

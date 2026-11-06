@@ -31,7 +31,7 @@
 - Hecho cuando: los tests pasan.
 - RF: RF-13, RF-19, RF-20, RF-23, RF-25, RF-26.
 
-## [ ] T2 — Modelos y migración `0004` (expandir)
+## [x] T2 — Modelos y migración `0004` (expandir)
 `Card`, `CardStatement`, `Prepayment` y las columnas `card_id`,
 `installments` y `first_due_start` de `Expense`, con sus restricciones e
 índices, y la migración `0004_cards_and_installments`.
