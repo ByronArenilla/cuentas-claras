@@ -100,6 +100,7 @@ button {
 .label {
   font-family: var(--font-figures);
   font-size: var(--size-label);
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
@@ -611,6 +612,12 @@ button {
   padding: var(--space-3) 0;
   border-bottom: var(--double-rule);
   font-weight: 600;
+}
+
+/* IBM Plex Mono solo se sirve en 400 y 500: un 600 lo engrosaría el
+   navegador (negrita sintética). */
+.total .figure {
+  font-weight: 500;
 }
 
 .month-switch {

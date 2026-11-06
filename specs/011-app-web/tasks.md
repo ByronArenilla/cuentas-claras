@@ -228,6 +228,10 @@ Pasada completa con la sección "Diseño" de la spec.
 - Hecho cuando: toda la lista de `verificacion.md` está marcada en Chrome
   de Android, Safari de iPhone y Chrome del computador.
 - RF: RF-31 a RF-35.
+- Estado (2026-11-06): hecha en el computador con Chromium sin interfaz; la
+  revisión corrigió `hidden` pisado por `display`, el desbordamiento a lo
+  ancho, el tamaño de "Volver a Gastos" y la negrita sintética de las
+  cifras. Falta la verificación en Android y en iPhone.
 
 ## [ ] T13 — ADR 0015
 `docs/adr/0015-web-sin-framework-sesion-y-pruebas.md`: token en

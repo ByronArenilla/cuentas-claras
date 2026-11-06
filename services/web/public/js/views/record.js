@@ -601,7 +601,15 @@ export async function renderEdit(main, app, { id }) {
       "div",
       { class: "screen__head edit-head" },
       h("h1", {}, "Editar gasto"),
-      h("a", { href: "/gastos", onClick: () => app.drafts.set("expenses-period", periodOf(expense.spent_on)) }, "Volver a Gastos"),
+      h(
+        "a",
+        {
+          class: "button button--link",
+          href: "/gastos",
+          onClick: () => app.drafts.set("expenses-period", periodOf(expense.spent_on)),
+        },
+        "Volver a Gastos",
+      ),
     ),
     controller.element,
     h("div", { class: "submit" }, remove),
