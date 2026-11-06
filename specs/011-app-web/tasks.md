@@ -40,7 +40,7 @@
 - Hecho cuando: los tests pasan.
 - RF: RF-38.
 
-## [ ] T3 — Servidor de la web y comandos
+## [x] T3 — Servidor de la web y comandos
 `services/web/serve.py`, `services/web/ruff.toml`, `public/index.html`
 mínimo, `make run-web` y `make test`/`make lint` con la web; `BIND_HOST` en
 `run-api` y `run-web`; `.env.example` (`BIND_HOST`, y el comentario de

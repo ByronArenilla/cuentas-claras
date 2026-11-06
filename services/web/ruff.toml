@@ -1,0 +1,2 @@
+# Mismas reglas de lint y formato que la API para todo el Python del repositorio.
+extend = "../api/pyproject.toml"
