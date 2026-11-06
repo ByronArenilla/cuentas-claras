@@ -103,6 +103,11 @@ button {
   color: var(--muted);
 }
 
+/* Lo excedido: rojo y con la palabra, nunca solo color (principio 4). */
+.over {
+  color: var(--red);
+}
+
 /* --- Esqueleto: encabezado, contenido y navegación --- */
 
 .app {
@@ -725,4 +730,13 @@ dialog::backdrop {
 [data-offline] [data-sends] {
   opacity: 0.45;
   pointer-events: none;
+}
+
+/* Registrar se lee como una sola hoja: renglones seguidos, sin huecos. */
+.record {
+  gap: 0;
+}
+
+.record > .rows {
+  border-top: 0;
 }

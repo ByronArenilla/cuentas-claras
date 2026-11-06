@@ -119,7 +119,7 @@ sesión.
 - Hecho cuando: los tests pasan y la verificación está marcada.
 - RF: RF-1 a RF-4.
 
-## [ ] T7 — Registrar un gasto a débito
+## [x] T7 — Registrar un gasto a débito
 `expense-form.js` (débito) y `views/record.js`: monto, tipo de pago, "Qué
 fue" con sugerencias de rubros, categoría, fecha, envío y "Deshacer".
 
