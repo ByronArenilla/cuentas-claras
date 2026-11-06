@@ -140,7 +140,7 @@ gasto" del plan (salvo la 1, de abonos, que es de T6).
 - Hecho cuando: los tests pasan.
 - RF: RF-20, RF-21, RF-31 a RF-33.
 
-## [ ] T6 — Abonos
+## [x] T6 — Abonos
 `POST` y `DELETE /expenses/{expense_id}/prepayments` en
 `app/routers/prepayments.py`, con `SELECT … FOR UPDATE` sobre la compra; en
 `expenses.py`, la regla 1 de "Editar un gasto" y el borrado rechazado de

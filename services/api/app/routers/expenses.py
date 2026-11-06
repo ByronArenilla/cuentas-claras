@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app import dates
 from app.db import get_db
 from app.deps import current_user, member_space, requested_period
-from app.models import BudgetItem, Card, Expense, Space, User
+from app.models import BudgetItem, Card, Expense, Prepayment, Space, User
 from app.routers.cards import first_due_start, usable_card
 from app.routers.categories import usable_category
 from app.schemas import (
@@ -61,6 +61,27 @@ DEBIT_WITHOUT_CARD = HTTPException(
 )
 # Campos que cambian el mes de pago de una compra con tarjeta (RF-14).
 DUE_FIELDS = ("amount", "spent_on", "card_id", "installments")
+# Lo único que se le cambia a una compra con abonos (RF-16, decisión 17).
+EDITABLE_WITH_PREPAYMENTS = {"description", "category_id"}
+HAS_PREPAYMENTS = HTTPException(
+    status.HTTP_409_CONFLICT,
+    "La compra tiene abonos: solo puedes cambiar su descripción y su categoría. "
+    "Para cambiar lo demás o borrarla, borra primero sus abonos.",
+)
+
+
+def has_prepayments(db: Session, expense: Expense) -> bool:
+    return (
+        db.scalar(
+            select(Prepayment.id)
+            .where(
+                Prepayment.expense_id == expense.id,
+                Prepayment.space_id == expense.space_id,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def item_in_space(db: Session, space_id: int, item_id: int) -> BudgetItem:
@@ -317,6 +338,10 @@ def update_expense(
     # `exclude_unset`: solo lo que llegó en el cuerpo (`model_fields_set`).
     # Un `"description": null` sí está y la quita (decisión 8).
     changes = data.model_dump(exclude_unset=True)
+    # 1: una compra con abonos solo cambia su descripción y su categoría; lo
+    # demás dejaría abonos calculados sobre otra compra (RF-16).
+    if changes.keys() - EDITABLE_WITH_PREPAYMENTS and has_prepayments(db, expense):
+        raise HAS_PREPAYMENTS
     changes.update(payment_changes(db, expense, changes))
 
     for field, value in changes.items():
@@ -340,6 +365,9 @@ def delete_expense(
     """
     if confirm != "true":
         raise UNCONFIRMED_DELETE
+    # Un abono es plata que salió: no se borra con la compra (RF-16).
+    if has_prepayments(db, expense):
+        raise HAS_PREPAYMENTS
 
     # Por `id` y `space_id`: la sentencia nunca toca otra fila (RF-18).
     db.execute(

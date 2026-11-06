@@ -827,3 +827,31 @@ class StatementOut(BaseModel):
     card_id: int
     period: PeriodOut
     amount: int
+
+
+def check_reduces(value: object) -> object:
+    if value not in ("installment", "term"):
+        raise PydanticCustomError(
+            "invalid_reduces",
+            "Indica si el abono baja la cuota (installment) o el plazo (term).",
+        )
+    return value
+
+
+class PrepaymentIn(BaseModel):
+    # Mismas reglas que el monto de un gasto (RF-23).
+    amount: Amount
+    # Cualquier mes con cuota y saldo después, también futuro (decisión 19).
+    period: Period = Field(default_factory=current_period)
+    reduces: Annotated[Literal["installment", "term"], BeforeValidator(check_reduces)]
+
+
+class PrepaymentCreatedOut(BaseModel):
+    # El abono y el plan de cuotas nuevo de la compra (RF-22).
+    prepayment: PrepaymentOut
+    schedule: ScheduleOut
+
+
+def format_pesos(amount: int) -> str:
+    """Monto con punto de miles, como se escribe en Colombia: 1.000.000."""
+    return f"{amount:,}".replace(",", ".")
