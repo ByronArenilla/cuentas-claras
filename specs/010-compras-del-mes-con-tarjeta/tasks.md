@@ -4,7 +4,7 @@
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`.
 
-## [ ] T1 — Marca de deuda y migración `0005`
+## [x] T1 — Marca de deuda y migración `0005`
 `Expense.is_debt`, la `CHECK` nueva y la migración `0005_debt_flag`.
 
 - Test primero (`test_models.py`, `test_migrations.py`):

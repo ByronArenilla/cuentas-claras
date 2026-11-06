@@ -412,6 +412,8 @@ def buy(
         card_id=card.id,
         installments=installments,
         first_due_start=dates.period_bounds(period)[0],
+        # Deuda, como trataba la 009 toda compra con tarjeta (spec 010).
+        is_debt=True,
     )
     session.add(expense)
     session.flush()
@@ -570,6 +572,7 @@ def test_a_legacy_credit_expense_counts_until_it_gets_a_card(
     legacy.card_id = visa["card"].id
     legacy.installments = 1
     legacy.first_due_start = DECEMBER
+    legacy.is_debt = True
     session.flush()
 
     assert build_summary(session, space.id, "2026-11").total.spent == 0

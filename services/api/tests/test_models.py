@@ -491,6 +491,8 @@ def make_purchase(
         "amount": 1_200_000,
         "spent_on": date(2026, 11, 12),
         "description": "Compra TV",
+        # Deuda, como trataba la 009 toda compra con tarjeta (spec 010).
+        "is_debt": True,
         **fields,
     }
     return make_expense(session, space, user, **values)
@@ -576,6 +578,10 @@ def test_expense_without_card_has_no_card_fields(session: Session) -> None:
         {"installments": 0},
         {"installments": 49},
         {"first_due_start": None},
+        # Spec 010: con tarjeta siempre se sabe si es deuda, y a varias cuotas
+        # lo es.
+        {"is_debt": None},
+        {"is_debt": False},
     ],
 )
 def test_database_rejects_a_malformed_card_purchase(
@@ -598,7 +604,12 @@ def test_database_rejects_a_card_purchase_with_a_budget_item(session: Session) -
 
 
 @pytest.mark.parametrize(
-    "fields", [{"installments": 1}, {"first_due_start": date(2026, 12, 1)}]
+    "fields",
+    [
+        {"installments": 1},
+        {"first_due_start": date(2026, 12, 1)},
+        {"is_debt": False},
+    ],
 )
 def test_database_rejects_card_fields_without_a_card(
     session: Session, fields: dict[str, object]
@@ -749,3 +760,37 @@ def test_deleting_space_cascades_to_cards_purchases_prepayments_and_statements(
     assert session.scalars(select(Prepayment.space_id)).all() == [kept.id]
     assert session.scalars(select(CardStatement.space_id)).all() == [kept.id]
     assert set(session.scalars(select(Expense.space_id)).all()) == {kept.id}
+
+
+# --- Gasto del mes con tarjeta (spec 010) ---
+
+
+def test_a_month_expense_on_a_card_is_saved_with_or_without_item(
+    session: Session,
+) -> None:
+    user, space = make_user(session), make_space(session)
+    card = make_card(session, space)
+    item = make_item(session, make_category(session, space, "Comida"))
+
+    planned = make_purchase(
+        session,
+        space,
+        user,
+        card,
+        installments=1,
+        is_debt=False,
+        budget_item_id=item.id,
+        category_id=item.category_id,
+        description=None,
+    )
+    # En otro espacio: `make_expense` crea una categoría "Comida N" por
+    # espacio, y dos en el mismo chocarían por nombre.
+    other = make_space(session, "Viajes")
+    unplanned = make_purchase(
+        session, other, user, make_card(session, other), installments=1, is_debt=False
+    )
+    session.expire_all()
+
+    assert session.get(Expense, planned.id).is_debt is False
+    assert session.get(Expense, planned.id).budget_item_id == item.id
+    assert session.get(Expense, unplanned.id).is_debt is False

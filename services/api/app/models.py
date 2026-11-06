@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -159,6 +160,19 @@ class Category(Base):
         return name
 
 
+# Forma de una compra con tarjeta (specs 009 y 010). La comparte la migración
+# 0005, que la crea en las bases existentes.
+CARD_PURCHASE_CHECK = (
+    "(card_id IS NULL AND installments IS NULL AND first_due_start IS NULL"
+    " AND is_debt IS NULL)"
+    " OR (card_id IS NOT NULL AND payment_type = 'credit'"
+    " AND installments IS NOT NULL AND installments BETWEEN 1 AND 48"
+    " AND first_due_start IS NOT NULL AND is_debt IS NOT NULL"
+    " AND (is_debt OR installments = 1)"
+    " AND (budget_item_id IS NULL OR NOT is_debt))"
+)
+
+
 class Expense(Base):
     __tablename__ = "expenses"
     __table_args__ = (
@@ -173,18 +187,14 @@ class Expense(Base):
         # Para cambiar o soltar los gastos de un rubro (RF-7, RF-8 de la
         # 008). PostgreSQL no indexa solas las claves foráneas.
         Index("ix_expenses_budget_item_id", "budget_item_id"),
-        # Una compra con tarjeta (spec 009) es a crédito, sin rubro, con 1 a 48
-        # cuotas y con su mes de pago; un gasto sin tarjeta no tiene ninguno
-        # de los tres datos. Última defensa si algo salta la validación.
-        # `IS NOT NULL` explícito: `NULL BETWEEN 1 AND 48` da NULL, y una CHECK
-        # que da NULL se considera cumplida.
+        # Una compra con tarjeta (spec 009) es a crédito, con 1 a 48 cuotas,
+        # su mes de pago y la marca de deuda (spec 010); un gasto sin tarjeta
+        # no tiene ninguno de esos datos. A varias cuotas es deuda, y solo un
+        # gasto del mes (no deuda) puede tener rubro. Última defensa si algo
+        # salta la validación. `IS NOT NULL` explícito: `NULL BETWEEN 1 AND
+        # 48` da NULL, y una CHECK que da NULL se considera cumplida.
         CheckConstraint(
-            "(card_id IS NULL AND installments IS NULL"
-            " AND first_due_start IS NULL)"
-            " OR (card_id IS NOT NULL AND payment_type = 'credit'"
-            " AND budget_item_id IS NULL AND installments IS NOT NULL"
-            " AND installments BETWEEN 1 AND 48"
-            " AND first_due_start IS NOT NULL)",
+            CARD_PURCHASE_CHECK,
             name="ck_expenses_card_purchase",
         ),
         # Deudas busca las compras de cada tarjeta en una ventana de meses, y
@@ -227,6 +237,10 @@ class Expense(Base):
     # Se guarda al registrar: si el banco cambia los días de la tarjeta, las
     # compras ya registradas no cambian de mes (decisión 13).
     first_due_start: Mapped[date | None] = mapped_column(Date)
+    # Spec 010: en una compra con tarjeta, verdadero si es deuda (llega a
+    # Deudas en los meses de pago) y falso si es un gasto del mes (cuenta el
+    # mes de la compra, como un débito). Nulo sin tarjeta.
+    is_debt: Mapped[bool | None] = mapped_column(Boolean)
 
 
 class BudgetItem(Base):

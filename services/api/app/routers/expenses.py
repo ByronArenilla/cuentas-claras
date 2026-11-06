@@ -176,6 +176,8 @@ def create_expense(
         **data.model_dump(exclude={"category_id"}),
         category_id=category_id,
         first_due_start=due_start,
+        # Hasta T2 de la 010, toda compra con tarjeta es deuda, como en la 009.
+        is_debt=True if data.card_id is not None else None,
         space_id=space.id,
         created_by=user.id,
     )
@@ -290,7 +292,12 @@ def payment_changes(db: Session, expense: Expense, changes: dict) -> dict:
             raise DEBIT_WITHOUT_CARD
         extra = item_changes(db, expense, changes)
         if expense.card_id is not None:
-            extra |= {"card_id": None, "installments": None, "first_due_start": None}
+            extra |= {
+                "card_id": None,
+                "installments": None,
+                "first_due_start": None,
+                "is_debt": None,
+            }
         return extra
 
     card_id = changes.get("card_id", expense.card_id)
@@ -315,7 +322,10 @@ def payment_changes(db: Session, expense: Expense, changes: dict) -> dict:
     if "category_id" in changes:
         usable_category(db, expense.space_id, changes["category_id"])
 
-    extra: dict = {"installments": changes.get("installments", expense.installments)}
+    extra: dict = {
+        "installments": changes.get("installments", expense.installments),
+        "is_debt": True,
+    }
     if extra["installments"] is None:
         extra["installments"] = 1
     # 5: el mes de pago se recalcula con los días actuales de la tarjeta solo
