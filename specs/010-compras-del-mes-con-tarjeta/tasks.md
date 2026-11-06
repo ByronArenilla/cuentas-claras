@@ -19,7 +19,7 @@
 - Hecho cuando: los tests pasan y ninguna ruta cambió de comportamiento.
 - RF: RF-12.
 
-## [ ] T2 — Registrar y editar como gasto del mes o deuda
+## [x] T2 — Registrar y editar como gasto del mes o deuda
 `is_debt` en los esquemas y las reglas de `payment_rules` y
 `payment_changes`.
 

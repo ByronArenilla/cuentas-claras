@@ -249,6 +249,8 @@ def test_expense_out_has_exactly_the_planned_fields() -> None:
         "card_id",
         "installments",
         "first_due_period",
+        # Spec 010: deuda o gasto del mes; nulo sin tarjeta (RF-4).
+        "is_debt",
     }
 
 
@@ -1275,14 +1277,16 @@ def test_listing_and_recent_bring_the_item(plan: Plan) -> None:
 # --- Compras con tarjeta (spec 009, T4) ---
 
 CARD_REQUIRED = "Un gasto a crédito necesita la tarjeta con la que se pagó."
+# Spec 010: las reglas de la 009 valen para las deudas.
 NO_ITEM_ON_CARD = (
-    "Una compra con tarjeta no lleva rubro: cuenta en Deudas el mes en que se "
-    "paga la tarjeta. Indica su categoría."
+    "Una deuda no lleva rubro: cuenta en Deudas el mes en que se paga la "
+    "tarjeta. Indica su categoría."
 )
 DESCRIPTION_REQUIRED = (
-    "Una compra con tarjeta necesita una descripción: es el nombre con el que "
-    "sus cuotas salen en Deudas."
+    "Una deuda necesita una descripción: es el nombre con el que sus cuotas "
+    "salen en Deudas."
 )
+INSTALLMENTS_ARE_DEBT = "Una compra a varias cuotas siempre es deuda."
 DEBIT_WITHOUT_CARD = "Un gasto a débito no lleva tarjeta ni cuotas."
 INSTALLMENTS_RANGE = "Las cuotas deben ser un número entero de 1 a 48."
 
@@ -1377,7 +1381,7 @@ def test_a_debit_expense_has_no_card_fields(cards: Cards) -> None:
         ({"card_id": None}, CARD_REQUIRED),
         ({"description": None}, DESCRIPTION_REQUIRED),
         ({"description": "   "}, DESCRIPTION_REQUIRED),
-        ({"category_id": None}, "Una compra con tarjeta necesita su categoría."),
+        ({"category_id": None}, "Una deuda necesita su categoría."),
         ({"installments": 0}, INSTALLMENTS_RANGE),
         ({"installments": 49}, INSTALLMENTS_RANGE),
         ({"installments": "3"}, INSTALLMENTS_RANGE),
@@ -1683,3 +1687,193 @@ def test_the_list_uses_the_purchase_date(cards: Cards) -> None:
 
     assert november.json() == [purchase]
     assert december.json() == []
+
+
+# --- Gasto del mes o deuda (spec 010, T2) ---
+
+
+def month_purchase(cards: Cards, **fields: object):
+    """El "Mercado" de 200.000 del 5 de noviembre con la Visa, a 1 cuota, en
+    el rubro "Mercado" de noviembre y sin decir si es deuda."""
+    body = {
+        "payment_type": "credit",
+        "card_id": cards.visa["id"],
+        "budget_item_id": cards.mercado_noviembre["id"],
+        "amount": 200000,
+        "spent_on": "2026-11-05",
+        **fields,
+    }
+    return cards.client.post(
+        f"/spaces/{cards.space_id}/expenses",
+        json={k: v for k, v in body.items() if v is not None},
+        headers=cards.headers,
+    )
+
+
+def test_a_card_purchase_in_the_plan_is_a_month_expense(cards: Cards) -> None:
+    # Criterio 1 (RF-1, RF-2, RF-4): a 1 cuota y sin decirlo, es del mes.
+    response = month_purchase(cards)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["is_debt"] is False
+    assert body["budget_item_id"] == cards.mercado_noviembre["id"]
+    assert body["category_id"] == cards.categories["Comida"]
+    assert body["description"] is None
+    assert (body["installments"], body["first_due_period"]) == (1, "2026-12")
+
+
+def test_a_month_expense_without_item_takes_a_category(cards: Cards) -> None:
+    response = month_purchase(
+        cards, budget_item_id=None, category_id=cards.categories["Ocio"]
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert (body["is_debt"], body["budget_item_id"], body["description"]) == (
+        False,
+        None,
+        None,
+    )
+
+
+def test_a_purchase_in_several_installments_is_a_debt(cards: Cards) -> None:
+    body = cards.purchase(installments=6, is_debt=None).json()
+
+    assert body["is_debt"] is True
+
+
+def test_a_debit_expense_has_no_debt_flag(cards: Cards) -> None:
+    body = cards.register(category_id=cards.categories["Salud"]).json()
+
+    assert body["is_debt"] is None
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"installments": 6, "is_debt": False}, INSTALLMENTS_ARE_DEBT),
+        ({"is_debt": True, "description": "Mercado"}, NO_ITEM_ON_CARD),
+        (
+            {"is_debt": True, "budget_item_id": None, "category_id": 2},
+            DESCRIPTION_REQUIRED,
+        ),
+        ({"category_id": 2}, EXACTLY_ONE),
+        ({"budget_item_id": None}, EXACTLY_ONE),
+        ({"is_debt": "true"}, "valid boolean"),
+    ],
+)
+def test_an_invalid_month_expense_or_debt_is_rejected(
+    cards: Cards, engine: Engine, fields: dict, message: str
+) -> None:
+    # Criterio 4 (RF-1 a RF-3).
+    response = month_purchase(cards, **fields)
+
+    assert response.status_code == 422
+    assert message in response.text
+    assert count_expenses(engine) == 0
+
+
+def test_a_month_expense_needs_an_item_of_its_month(
+    cards: Cards, engine: Engine
+) -> None:
+    # El rubro "Mercado" de octubre no sirve para una compra de noviembre.
+    response = month_purchase(cards, budget_item_id=cards.mercado["id"])
+
+    assert response.status_code == 422
+    assert "es de 2026-10 y el gasto es de 2026-11" in response.json()["detail"]
+    assert count_expenses(engine) == 0
+
+
+def test_a_debit_expense_with_a_debt_flag_is_rejected(cards: Cards) -> None:
+    response = cards.register(category_id=cards.categories["Salud"], is_debt=False)
+
+    assert response.status_code == 422
+    assert DEBIT_WITHOUT_CARD in response.text
+
+
+def test_a_month_expense_becomes_a_debt_without_its_item(cards: Cards) -> None:
+    # Criterio 5 (RF-5).
+    mercado = month_purchase(cards).json()
+
+    keeps_item = cards.patch(mercado["id"], {"is_debt": True})
+    assert keeps_item.status_code == 422
+    assert keeps_item.json()["detail"] == NO_ITEM_ON_CARD
+
+    no_description = cards.patch(
+        mercado["id"], {"is_debt": True, "budget_item_id": None}
+    )
+    assert no_description.json()["detail"] == DESCRIPTION_REQUIRED
+
+    debt = cards.patch(
+        mercado["id"],
+        {"is_debt": True, "budget_item_id": None, "description": "Mercado Éxito"},
+    )
+    assert debt.status_code == 200
+    body = debt.json()
+    assert (body["is_debt"], body["budget_item_id"]) == (True, None)
+    assert body["category_id"] == cards.categories["Comida"]
+
+
+def test_several_installments_make_a_month_expense_a_debt(cards: Cards) -> None:
+    cine = month_purchase(
+        cards,
+        budget_item_id=None,
+        category_id=cards.categories["Ocio"],
+        description="Cine",
+    ).json()
+
+    body = cards.patch(cine["id"], {"installments": 3}).json()
+
+    assert (body["installments"], body["is_debt"]) == (3, True)
+
+
+def test_several_installments_with_an_item_need_to_drop_it(cards: Cards) -> None:
+    mercado = month_purchase(cards).json()
+
+    response = cards.patch(mercado["id"], {"installments": 3})
+
+    assert response.json()["detail"] == NO_ITEM_ON_CARD
+
+
+def test_a_debt_in_several_installments_cannot_be_a_month_expense(
+    cards: Cards,
+) -> None:
+    tv = cards.purchase(installments=6).json()
+
+    response = cards.patch(tv["id"], {"is_debt": False})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == INSTALLMENTS_ARE_DEBT
+
+
+def test_a_one_installment_debt_becomes_a_month_expense(cards: Cards) -> None:
+    zapatos = cards.purchase(
+        description="Zapatos", amount=150000, spent_on="2026-11-20"
+    ).json()
+    assert zapatos["is_debt"] is True
+
+    body = cards.patch(
+        zapatos["id"],
+        {"is_debt": False, "budget_item_id": cards.mercado_noviembre["id"]},
+    ).json()
+
+    assert body["is_debt"] is False
+    assert body["budget_item_id"] == cards.mercado_noviembre["id"]
+    assert body["category_id"] == cards.categories["Comida"]
+
+
+def test_debit_to_credit_keeps_the_item_as_a_month_expense(cards: Cards) -> None:
+    planned = cards.register(
+        budget_item_id=cards.mercado_noviembre["id"], spent_on="2026-11-12"
+    ).json()
+
+    body = cards.patch(
+        planned["id"], {"payment_type": "credit", "card_id": cards.visa["id"]}
+    ).json()
+
+    assert (body["is_debt"], body["budget_item_id"]) == (
+        False,
+        cards.mercado_noviembre["id"],
+    )
+    assert body["first_due_period"] == "2026-12"
