@@ -261,3 +261,6 @@ días renovable con el uso (cambia RF-8 de la 001), pruebas con `node
 - Hecho cuando: `make test` y `make lint` están en verde y la verificación
   a mano está completa.
 - RF: cierra la spec.
+- Estado (2026-11-06): README hecho y criterios 1 a 4 y 6 en verde. Faltan
+  la verificación en Android e iPhone (criterio 5) y, después, marcar la
+  011 en el roadmap.

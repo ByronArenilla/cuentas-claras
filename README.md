@@ -3,9 +3,9 @@
 App para controlar el presupuesto mensual, en solitario o compartido con
 otras personas. El mes se planea en el computador y cada gasto se registra
 desde el celular, en la misma app web: se fija en la pantalla de inicio desde
-el navegador y se abre como una aplicación, sin descargar nada de una tienda.
-La web llega con la spec 010; mientras tanto, todo se hace con la API (ver
-"Registrar gastos mientras llega la web").
+el navegador y se abre como una aplicación, sin descargar nada de una tienda
+(ver "La web"). Planear el mes y la pantalla de tarjetas llegan con la spec
+012; mientras tanto, eso se hace con la API.
 
 Es mi proyecto de portafolio DevOps. La aplicación es pequeña a propósito y
 la infraestructura crece por fases: Docker, Nginx, GitHub Actions, AWS,
@@ -17,19 +17,21 @@ Se desarrolla con **Spec-Driven Development (SDD)**: todo empieza por una spec.
 Fase actual y spec activa: ver [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Puesta en marcha
-Requiere Python 3.12 y `make`.
+Requiere Python 3.12, `make` y Node 22 o más nuevo (solo para las pruebas de
+la web: sin `npm` ni dependencias).
 
 ```sh
 make install          # crea el entorno virtual de la API
 cp .env.example .env  # y rellena los valores
-make run-api          # http://localhost:8000
-make test             # tests de la API
+make run-api          # la API en http://localhost:8000
+make run-web          # la web en http://localhost:8080 (en otra terminal)
+make test             # pytest de la API y de la web, y node --test
 make lint             # ruff check y ruff format --check
 ```
 
 Si falta `DATABASE_URL`, `TZ` o `WEB_BASE_URL`, la API no arranca y dice
-cuál falta. La documentación interactiva de la API está en
-http://localhost:8000/docs.
+cuál falta; si falta `API_URL`, la web tampoco. La documentación interactiva
+de la API está en http://localhost:8000/docs.
 
 **Si tu `.env` es de antes de la spec 007**, puede tener `TELEGRAM_BOT_TOKEN`
 y `BOT_API_KEY`. Ya no se usan y puedes borrarlas; si se quedan, la API
@@ -88,16 +90,69 @@ Revisa siempre el archivo generado: es un borrador. Si olvidas la
 migración, el test `test_an_empty_database_ends_with_the_schema_of_the_models`
 falla porque el esquema migrado ya no coincide con los modelos.
 
-## Registrar gastos mientras llega la web
-Hasta la spec 010 no hay app web, así que los gastos se registran con la
-API, de dos formas:
+## La web
+Con `make run-api` y `make run-web`, abre http://localhost:8080. La web es
+HTML, CSS y módulos de JavaScript sin framework ni compilación
+(`services/web/public/`). En desarrollo la sirve `services/web/serve.py`,
+que pone las cabeceras de seguridad y responde la página a cualquier ruta
+de la app. Por qué así:
+[ADR 0015](docs/adr/0015-web-sin-framework-sesion-y-pruebas.md).
 
-- **Con `curl`**, como en los ejemplos de este README: primero
-  `POST /auth/login` para obtener el token y después
-  `POST /spaces/{id}/expenses` (ver "Gastos").
-- **Desde http://localhost:8000/docs**: inicia sesión con
-  `POST /auth/login` en "Try it out", copia el `access_token`, pégalo en el
-  botón **Authorize** y prueba cualquier ruta desde el navegador.
+- **Registrar**: abre con el teclado numérico en el monto. "Qué fue"
+  sugiere los rubros del mes con lo que queda. A crédito pide la tarjeta y
+  las cuotas, y a 1 cuota pregunta si estaba en el plan del mes. Antes de
+  guardar muestra cuándo y cuánto se paga. Tras registrar, "Deshacer" dura
+  10 segundos.
+- **Gastos**: los del mes por fecha de compra, con flechas de mes y "Solo
+  los míos". Tocar un gasto lo edita o lo borra (con confirmación).
+- **Espacio**: cambiar de espacio, crear uno, compartirlo con un enlace de
+  un solo uso que caduca en 24 horas, salir de uno compartido, cerrar
+  sesión y la guía para fijar la app.
+
+**Se entra una sola vez.** La sesión se renueva cada vez que se usa la app
+y caduca tras 90 días sin abrirla. Cerrar sesión la corta al momento.
+
+**Fijar en la pantalla de inicio.** La pestaña Espacio muestra los pasos del
+navegador que estás usando: Safari en iPhone, Chrome en Android, o Chrome o
+Edge en el computador. No se descarga nada. Sin HTTPS (llega con la 019),
+en el celular el ícono abre la web en el navegador y no a pantalla
+completa; en el computador, `localhost` ya cuenta como seguro.
+
+**Probar en el celular**, en la red de la casa:
+
+1. Busca la IP del computador (por ejemplo `192.168.1.20`).
+2. En `.env`, pon `BIND_HOST=0.0.0.0`,
+   `API_URL=http://192.168.1.20:8000` y
+   `WEB_BASE_URL=http://192.168.1.20:8080`.
+3. Arranca `make run-api` y `make run-web`, y abre
+   `http://192.168.1.20:8080` en el celular.
+
+Con `BIND_HOST=0.0.0.0`, la API y la web aceptan conexiones de cualquier
+equipo de esa red: vuelve a `127.0.0.1` al terminar, y no lo hagas en una
+red pública.
+
+**Diseño.** Dirección "Libro auxiliar": papel verdoso, renglones, tinta
+casi negra y la doble raya roja de los totales, con tema claro y oscuro
+según el sistema. Las reglas están en la sección "Diseño" de
+`specs/011-app-web/spec.md`, y los colores, en
+`services/web/public/css/tokens.css`. Un test comprueba su contraste en los
+dos temas.
+
+**Regenerar los íconos** después de cambiar `icons/icon.svg` o
+`icons/icon-maskable.svg` (desde `services/web/public/icons`):
+
+```sh
+rsvg-convert -w 192 -h 192 icon.svg -o icon-192.png
+rsvg-convert -w 512 -h 512 icon.svg -o icon-512.png
+rsvg-convert -w 512 -h 512 icon-maskable.svg -o icon-maskable-512.png
+rsvg-convert -w 180 -h 180 icon-maskable.svg -o apple-touch-icon.png
+```
+
+**Con la API directamente.** Lo que la web todavía no hace (planear el mes,
+tarjetas y categorías) se hace con `curl`, como en los ejemplos de este
+README, o desde http://localhost:8000/docs: inicia sesión con
+`POST /auth/login` en "Try it out", copia el `access_token`, pégalo en el
+botón **Authorize** y prueba cualquier ruta.
 
 ## Usuarios, espacios e invitaciones
 Los datos pertenecen a un **espacio**, no a una persona. Cada usuario tiene
