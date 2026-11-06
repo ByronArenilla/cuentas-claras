@@ -56,7 +56,7 @@
 - Hecho cuando: los tests pasan y ninguna ruta cambió de comportamiento.
 - RF: RF-45; base de RF-2, RF-3, RF-11, RF-24, RF-31 y RF-44.
 
-## [ ] T3 — Rutas de tarjetas
+## [x] T3 — Rutas de tarjetas
 `app/routers/cards.py` con `POST`, `GET`, `PATCH` y `DELETE` de tarjetas,
 montado en `main.py`. `CardIn`, `CardPatch`, `CardOut` y `CardDeletedOut`.
 

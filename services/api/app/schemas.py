@@ -6,6 +6,7 @@ por accidente el hash de la contraseña (RF-7).
 
 import re
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -14,6 +15,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PlainSerializer,
     StrictInt,
     field_validator,
     model_validator,
@@ -21,6 +23,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from app import dates
+from app.models import Card
 
 MIN_PASSWORD_LENGTH = 12
 MAX_EMAIL_LENGTH = 320
@@ -540,3 +543,136 @@ class PlanCopyOut(BaseModel):
     # rubros omitidos (RF-13).
     summary: SummaryOut
     skipped: list[SkippedItemOut]
+
+
+# --- Tarjetas (spec 009) ---
+
+MAX_CARD_NAME_LENGTH = 50
+MAX_RATE = Decimal(10)
+RATE_MESSAGE = (
+    "La tasa mensual debe ser un número de 0.01 a 10 con hasta dos decimales, "
+    "por ejemplo 1.89."
+)
+
+
+def check_card_name(value: str) -> str:
+    # Como las categorías: sin espacios alrededor y de 1 a 50 caracteres
+    # (RF-2).
+    name = value.strip()
+    if not 1 <= len(name) <= MAX_CARD_NAME_LENGTH:
+        raise PydanticCustomError(
+            "invalid_card_name",
+            "El nombre de la tarjeta debe tener entre 1 y {max_length} caracteres.",
+            {"max_length": MAX_CARD_NAME_LENGTH},
+        )
+    return name
+
+
+def card_day(label: str) -> BeforeValidator:
+    """Día de corte o de pago: entero de 1 a 31 (RF-3). Estricto: ni `"5"` ni
+    `5.0` ni `true` son un día."""
+
+    def check(value: object) -> object:
+        valid = isinstance(value, int) and not isinstance(value, bool)
+        if not valid or not 1 <= value <= 31:
+            raise PydanticCustomError(
+                "invalid_card_day", f"El {label} debe ser un número entero de 1 a 31."
+            )
+        return value
+
+    return BeforeValidator(check)
+
+
+def parse_rate(value: object) -> object:
+    """Tasa mensual en porcentaje: número de 0,01 a 10 con hasta dos decimales
+    (RF-3, decisión 27). Se convierte a `Decimal` y nunca se calcula con
+    `float`.
+
+    El JSON llega a Python como `float` (`1.89`); `str()` da el número tal
+    como se escribió, porque Python muestra el decimal más corto que vuelve
+    al mismo `float`, y de ahí sale un `Decimal` exacto. Texto y booleanos se
+    rechazan, como en los montos.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise PydanticCustomError("invalid_rate", RATE_MESSAGE)
+    rate = Decimal(str(value))
+    # `as_tuple().exponent` es -2 para 1.89 y -3 para 1.895.
+    if not 0 < rate <= MAX_RATE or rate.as_tuple().exponent < -2:
+        raise PydanticCustomError("invalid_rate", RATE_MESSAGE)
+    return rate
+
+
+def rate_to_bp(rate: Decimal | None) -> int | None:
+    """De porcentaje a puntos básicos, como se guarda: 1.89 → 189."""
+    return None if rate is None else int(rate * 100)
+
+
+def rate_from_bp(rate_bp: int | None) -> Decimal | None:
+    return None if rate_bp is None else Decimal(rate_bp) / 100
+
+
+def rate_number(rate: Decimal | None) -> float | int | None:
+    # Sale como número JSON (`1.89`) y no como texto, que es lo que Pydantic
+    # hace con un `Decimal`. Solo es para mostrarla: ningún cálculo usa este
+    # `float`.
+    if rate is None:
+        return None
+    return int(rate) if rate == rate.to_integral_value() else float(rate)
+
+
+CardName = Annotated[str, AfterValidator(check_card_name)]
+CutoffDay = Annotated[int, card_day("día de corte")]
+DueDay = Annotated[int, card_day("día límite de pago")]
+MonthlyRate = Annotated[Decimal | None, BeforeValidator(parse_rate)]
+RateOut = Annotated[Decimal | None, PlainSerializer(rate_number)]
+
+
+class CardIn(BaseModel):
+    name: CardName
+    cutoff_day: CutoffDay
+    due_day: DueDay
+    monthly_rate: MonthlyRate = None
+
+
+class CardPatch(BaseModel):
+    # La ruta aplica solo `model_fields_set` (RF-5).
+    name: CardName | None = None
+    cutoff_day: CutoffDay | None = None
+    due_day: DueDay | None = None
+    # `null` aquí sí vale: quita la tasa.
+    monthly_rate: MonthlyRate = None
+
+    _no_nulls = field_validator("name", "cutoff_day", "due_day", mode="before")(
+        reject_nulls
+    )
+
+
+class CardOut(BaseModel):
+    id: int
+    name: str
+    cutoff_day: int
+    due_day: int
+    monthly_rate: RateOut
+    # Una archivada sale en Deudas, en su estado y al editarla (decisión 21).
+    deleted: bool
+
+    @classmethod
+    def of(cls, card: Card) -> "CardOut":
+        return cls(
+            id=card.id,
+            name=card.name,
+            cutoff_day=card.cutoff_day,
+            due_day=card.due_day,
+            monthly_rate=rate_from_bp(card.monthly_rate_bp),
+            deleted=card.deleted_at is not None,
+        )
+
+
+class CardDeletedOut(BaseModel):
+    # Con el aviso de que sus cuotas siguen llegando y cómo volver a usarla
+    # (RF-6), que la web muestra tal cual.
+    id: int
+    name: str
+    message: str
