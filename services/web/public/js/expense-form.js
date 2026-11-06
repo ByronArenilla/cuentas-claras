@@ -191,3 +191,76 @@ export function simulationSummary(simulation) {
 export function afterRecord(form) {
   return newForm({ paymentType: form.paymentType, cardId: form.cardId, date: form.date });
 }
+
+// --- Editar (RF-20, decisión 24) ---
+
+/** El formulario de un gasto que ya existe, con su fecha explícita. */
+export function formFromExpense(expense, items) {
+  const item = items.find((candidate) => candidate.id === expense.budget_item_id);
+  const card = expense.card_id !== null;
+  const installments = expense.installments ?? 1;
+  return {
+    amount: expense.amount,
+    paymentType: expense.payment_type,
+    description: item ? item.name : (expense.description ?? ""),
+    itemId: expense.budget_item_id,
+    itemPeriod: expense.budget_item_id !== null ? periodOf(expense.spent_on) : null,
+    categoryId: expense.category_id,
+    date: expense.spent_on,
+    cardId: expense.card_id,
+    installments,
+    inPlan: card && installments === 1 ? !expense.is_debt : null,
+  };
+}
+
+/** Solo lo que cambió, para `PATCH /expenses/{id}`. Quitar el rubro manda
+ * `budget_item_id: null` con la categoría (RF-21 de la 008). */
+export function buildChanges(original, form) {
+  const target = buildExpense(form);
+  const changes = {};
+  const set = (key, value) => {
+    if (value !== original[key]) changes[key] = value;
+  };
+  set("amount", target.amount);
+  set("payment_type", target.payment_type);
+  if (target.payment_type === "credit") {
+    set("card_id", target.card_id);
+    set("installments", target.installments);
+    set("is_debt", target.is_debt);
+  }
+  if (target.budget_item_id !== undefined) {
+    set("budget_item_id", target.budget_item_id);
+  } else {
+    if (original.budget_item_id !== null) {
+      changes.budget_item_id = null;
+      changes.category_id = target.category_id;
+    } else {
+      set("category_id", target.category_id);
+    }
+    const description = target.description ?? null;
+    if (description !== (original.description ?? null)) changes.description = description;
+  }
+  if (form.date) set("spent_on", form.date);
+  return changes;
+}
+
+const LOCKED_WITH_PREPAYMENTS = [
+  "amount",
+  "payment_type",
+  "card_id",
+  "installments",
+  "is_debt",
+  "spent_on",
+];
+
+/** Una compra con abonos solo cambia qué fue y categoría (RF-16 de la 009,
+ * decisión 24). `null` si no tiene abonos. */
+export function lockFor(hasPrepayments) {
+  if (!hasPrepayments) return null;
+  return {
+    fields: new Set(LOCKED_WITH_PREPAYMENTS),
+    reason:
+      "Esta compra tiene abonos: solo puedes cambiar qué fue y la categoría. " +
+      "Para cambiar lo demás o borrarla, primero hay que borrar sus abonos.",
+  };
+}

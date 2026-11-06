@@ -6,11 +6,14 @@ import { h } from "../dom.js";
 import {
   QUICK_INSTALLMENTS,
   afterRecord,
+  buildChanges,
   buildExpense,
   changeDate,
   chooseItem,
+  formFromExpense,
   formPeriod,
   kindOf,
+  lockFor,
   missing,
   newForm,
   parseInstallments,
@@ -20,7 +23,14 @@ import {
   typeDescription,
   usesItems,
 } from "../expense-form.js";
-import { formatDay, formatNumber, formatPesos, monthName, parseAmount } from "../format.js";
+import {
+  formatDay,
+  formatNumber,
+  formatPesos,
+  monthName,
+  parseAmount,
+  periodOf,
+} from "../format.js";
 import { OFFLINE_SAVE, clearErrors, field, formError, setBusy, showErrors } from "./form.js";
 
 const DRAFT = "record";
@@ -526,6 +536,75 @@ function announce(app, data, expense, name) {
   });
 }
 
-export async function renderEdit(main) {
-  main.append(h("p", { class: "screen muted" }, "Editar un gasto llega en T9."));
+/** Editar un gasto (RF-20, RF-21): el mismo formulario, que envía solo lo
+ * que cambió, y borrar con confirmación (decisión 23). */
+export async function renderEdit(main, app, { id }) {
+  const data = createData(app);
+  await data.load();
+  const url = `${data.base}/expenses/${id}`;
+  const expense = await app.api.get(url);
+  const items = await data.items(periodOf(expense.spent_on));
+  let lock = null;
+  if (expense.card_id !== null) {
+    const schedule = await app.api.get(`${url}/installments`);
+    lock = lockFor(schedule.prepayments.length > 0);
+  }
+  const backToList = () => {
+    app.drafts.set("expenses-period", periodOf(expense.spent_on));
+    app.navigate("/gastos");
+  };
+
+  const controller = await buildRecordForm(app, data, {
+    initial: formFromExpense(expense, items),
+    submitLabel: "Guardar cambios",
+    busyLabel: "Guardando…",
+    locked: lock,
+    onSubmit: async (form) => {
+      const changes = buildChanges(expense, form);
+      if (Object.keys(changes).length) {
+        await app.api.patch(url, changes);
+        app.notices.show({ text: "Cambios guardados.", seconds: 6 });
+      }
+      backToList();
+    },
+  });
+
+  const name = controller.form.description || data.categoryName(expense.category_id);
+  const remove = h(
+    "button",
+    {
+      type: "button",
+      class: "button button--danger button--block",
+      "data-sends": true,
+      onClick: async () => {
+        const confirmed = await app.confirm({
+          title: "¿Borrar este gasto?",
+          body: `${name} · ${formatPesos(expense.amount)} · ${formatDay(expense.spent_on)}. No se puede deshacer.`,
+          confirmLabel: "Borrar gasto",
+          danger: true,
+        });
+        if (!confirmed) return;
+        try {
+          await app.api.del(url, { confirm: "true" });
+          app.notices.show({ text: `Borrado: ${name}.`, seconds: 6 });
+          backToList();
+        } catch (error) {
+          app.notices.show({ text: error.message, kind: "error", seconds: 0 });
+        }
+      },
+    },
+    "Borrar gasto",
+  );
+
+  main.append(
+    h(
+      "div",
+      { class: "screen__head edit-head" },
+      h("h1", {}, "Editar gasto"),
+      h("a", { href: "/gastos", onClick: () => app.drafts.set("expenses-period", periodOf(expense.spent_on)) }, "Volver a Gastos"),
+    ),
+    controller.element,
+    h("div", { class: "submit" }, remove),
+  );
+  controller.focus();
 }

@@ -752,3 +752,14 @@ dialog::backdrop {
 .record > .rows {
   border-top: 0;
 }
+
+.edit-head {
+  padding-top: var(--space-5);
+}
+
+/* Un filtro activo ("Solo los míos") se ve presionado, en tinta. */
+.button--quiet[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}

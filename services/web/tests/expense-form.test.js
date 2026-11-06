@@ -270,3 +270,88 @@ test("tras registrar a crédito se conserva la tarjeta y la pregunta vuelve a qu
   assert.equal(next.installments, 1);
   assert.equal(next.inPlan, null);
 });
+
+// --- Editar (T9, RF-20 y decisión 24) ---
+
+import { buildChanges, formFromExpense, lockFor } from "../public/js/expense-form.js";
+
+const MERCADO = {
+  id: 7,
+  amount: 52000,
+  payment_type: "debit",
+  category_id: 2,
+  budget_item_id: 1,
+  description: null,
+  spent_on: "2026-11-02",
+  card_id: null,
+  installments: null,
+  is_debt: null,
+};
+
+test("el formulario de edición parte del gasto, con su fecha", () => {
+  const form = formFromExpense(MERCADO, ITEMS);
+
+  assert.equal(form.amount, 52000);
+  assert.equal(form.itemId, 1);
+  assert.equal(form.itemPeriod, "2026-11");
+  assert.equal(form.description, "Mercado");
+  assert.equal(form.date, "2026-11-02");
+  assert.deepEqual(buildChanges(MERCADO, form), {});
+});
+
+test("editar envía solo lo que cambió", () => {
+  const form = { ...formFromExpense(MERCADO, ITEMS), amount: 18500 };
+
+  assert.deepEqual(buildChanges(MERCADO, form), { amount: 18500 });
+});
+
+test("quitar el rubro envía budget_item_id null con la categoría", () => {
+  const form = { ...typeDescription(formFromExpense(MERCADO, ITEMS), "Panadería"), categoryId: 2 };
+
+  assert.deepEqual(buildChanges(MERCADO, form), {
+    budget_item_id: null,
+    category_id: 2,
+    description: "Panadería",
+  });
+});
+
+test("pasar a otro rubro envía el rubro", () => {
+  const form = chooseItem(formFromExpense(MERCADO, ITEMS), ITEMS[1], "2026-11");
+
+  assert.deepEqual(buildChanges(MERCADO, form), { budget_item_id: 2 });
+});
+
+test("una compra con tarjeta parte de su respuesta: del mes o deuda", () => {
+  const tv = {
+    ...MERCADO,
+    id: 8,
+    amount: 1200000,
+    payment_type: "credit",
+    budget_item_id: null,
+    category_id: 1,
+    description: "Compra TV",
+    card_id: 1,
+    installments: 1,
+    is_debt: true,
+  };
+
+  const form = formFromExpense(tv, ITEMS);
+  assert.equal(form.inPlan, false);
+
+  const toSix = { ...form, installments: 6 };
+  assert.deepEqual(buildChanges(tv, toSix), { installments: 6 });
+
+  const toMonth = { ...form, inPlan: true };
+  assert.deepEqual(buildChanges(tv, toMonth), { is_debt: false });
+});
+
+test("una compra con abonos solo cambia qué fue y categoría (decisión 24)", () => {
+  const lock = lockFor(true);
+
+  assert.deepEqual(
+    [...lock.fields].sort(),
+    ["amount", "card_id", "installments", "is_debt", "payment_type", "spent_on"],
+  );
+  assert.match(lock.reason, /abonos/);
+  assert.equal(lockFor(false), null);
+});

@@ -162,7 +162,7 @@ categoría, descripción obligatoria y la simulación.
 - Hecho cuando: los tests pasan y la verificación está marcada.
 - RF: RF-6, RF-10 a RF-12.
 
-## [ ] T9 — Gastos del mes: ver, editar y borrar
+## [x] T9 — Gastos del mes: ver, editar y borrar
 `expenses-list.js`, `views/expenses.js`, la edición en `views/record.js`
 (`/gastos/<id>`) y el diálogo de borrar.
 
