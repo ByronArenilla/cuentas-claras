@@ -6,6 +6,7 @@ configurada en `TZ`. Los tests fijan el reloj sustituyendo `now` con
 o a través de `today()`, nunca importarlo con `from app.dates import now`.
 """
 
+import calendar
 import re
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
@@ -55,3 +56,44 @@ def previous_period(period: str) -> str:
     if start.month == 1:
         return period_of(date(start.year - 1, 12, 1))
     return period_of(date(start.year, start.month - 1, 1))
+
+
+def shift_period(period: str, months: int) -> str:
+    """El periodo `months` meses después (o antes, si es negativo): de
+    `2026-11` y `2` sale `2027-01` (spec 009, RF-13).
+
+    Lanza `ValueError` si `period` no es un mes `YYYY-MM`.
+    """
+    start, _ = period_bounds(period)
+    # Meses contados desde el año 0: así se suma sin pensar en cambios de año.
+    year, month_index = divmod(start.year * 12 + start.month - 1 + months, 12)
+    return f"{year:04d}-{month_index + 1:02d}"
+
+
+def _day_in_month(year: int, month: int, day: int) -> date:
+    """El día `day` del mes o, si el mes no lo tiene (un 31 en abril), su
+    último día (decisión 12 de la 009)."""
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(day, last_day))
+
+
+def _next_month(day: date) -> tuple[int, int]:
+    return (day.year + 1, 1) if day.month == 12 else (day.year, day.month + 1)
+
+
+def first_due_period(spent_on: date, cutoff_day: int, due_day: int) -> str:
+    """Mes de pago de la primera cuota de una compra con tarjeta (spec 009,
+    decisión 12, RF-13).
+
+    La compra entra en el primer corte en su fecha o después (una compra el
+    mismo día de corte entra en ese corte), y se paga en el primer día límite
+    estrictamente después de ese corte.
+    """
+    cutoff = _day_in_month(spent_on.year, spent_on.month, cutoff_day)
+    if cutoff < spent_on:
+        cutoff = _day_in_month(*_next_month(spent_on), cutoff_day)
+
+    due = _day_in_month(cutoff.year, cutoff.month, due_day)
+    if due <= cutoff:
+        due = _day_in_month(*_next_month(cutoff), due_day)
+    return period_of(due)

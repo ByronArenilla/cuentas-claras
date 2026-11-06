@@ -7,7 +7,7 @@
   (T3 a T9), el aislamiento (T10) y el cierre (T11 y T12). Cada tarea deja
   la API funcionando.
 
-## [ ] T1 — Mes de pago y plan de cuotas (cálculo puro)
+## [x] T1 — Mes de pago y plan de cuotas (cálculo puro)
 `dates.py`: `shift_period` y `first_due_period`. `app/installments.py`:
 `PrepaymentPlan`, `Installment`, `split_capital`, `interest`,
 `build_schedule` y `prepayment_limit`. Nada de base de datos ni HTTP.
