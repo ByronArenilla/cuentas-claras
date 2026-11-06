@@ -75,7 +75,7 @@ decisión 1 cambiada por el 0014.
 - Hecho cuando: el ADR existe con la plantilla y el plan lo cita.
 - RF: ninguno; principio 4.
 
-## [ ] T6 — Cierre: README y roadmap
+## [x] T6 — Cierre: README y roadmap
 - `README.md`: en "Tarjetas y compras a cuotas", gasto del mes o deuda,
   `is_debt`, a pagar y la deuda con valor real; los ejemplos `curl`
   probados contra la API.

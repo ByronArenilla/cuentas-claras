@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 010-compras-del-mes-con-tarjeta
+> **Spec activa:** 011-app-web
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -44,7 +44,7 @@ está validada. Marca con [x] las specs terminadas.
   - Entran los abonos a una compra, que bajan la cuota o el plazo, y
     cancelarla antes de tiempo. El roadmap los dejaba fuera; se cambió en
     la clarificación (2026-11-06).
-- [ ] 010-compras-del-mes-con-tarjeta — Distinguir un gasto del mes pagado con tarjeta de una deuda.
+- [x] 010-compras-del-mes-con-tarjeta — Distinguir un gasto del mes pagado con tarjeta de una deuda.
   - Surgió al especificar la web (2026-11-06) y cambia la decisión 1 de la
     009: no toda compra con tarjeta es deuda.
   - **A varias cuotas, siempre es deuda**, como en la 009.
