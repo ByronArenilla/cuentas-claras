@@ -45,6 +45,9 @@ const api = createApi({
   // La sesión caducó o se cerró en otro lado (RF-3, decisión 16): se pide
   // entrar de nuevo y después se vuelve a esta misma pantalla.
   onUnauthorized: (message) => {
+    // Sin sesión guardada (unas credenciales malas al entrar), el 401 es solo
+    // un error del formulario.
+    if (!session.isLoggedIn()) return;
     session.clear();
     app.me = null;
     session.setNext(location.pathname);

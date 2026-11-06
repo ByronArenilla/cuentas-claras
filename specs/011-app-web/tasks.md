@@ -105,7 +105,7 @@ contenedores de avisos, `manifest.webmanifest`, `icon.svg` y sus PNG, y
 - Hecho cuando: los tests pasan.
 - RF: RF-3, RF-7, RF-15, RF-23, RF-30, RF-35.
 
-## [ ] T6 — Entrar, crear cuenta y cerrar sesión
+## [x] T6 — Entrar, crear cuenta y cerrar sesión
 `views/auth.js`, la redirección de `/` y el bloque "Tu cuenta" con cerrar
 sesión.
 
