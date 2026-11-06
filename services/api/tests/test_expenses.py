@@ -75,9 +75,16 @@ def test_amount_survives_json_without_conversion() -> None:
     assert expense.amount == 20000
 
 
-@pytest.mark.parametrize("payment_type", ["credit", "debit"])
-def test_valid_payment_types(payment_type: str) -> None:
-    expense = ExpenseIn.model_validate({**VALID, "payment_type": payment_type})
+@pytest.mark.parametrize(
+    ("payment_type", "extra"),
+    [
+        # Desde la 009, un gasto a crédito lleva tarjeta y descripción.
+        ("credit", {"card_id": 1, "description": "Compra TV"}),
+        ("debit", {}),
+    ],
+)
+def test_valid_payment_types(payment_type: str, extra: dict[str, object]) -> None:
+    expense = ExpenseIn.model_validate({**VALID, "payment_type": payment_type, **extra})
     assert expense.payment_type == payment_type
 
 
@@ -237,6 +244,11 @@ def test_expense_out_has_exactly_the_planned_fields() -> None:
         "created_at",
         # Spec 008: el rubro del gasto, nulo si no estaba planeado (RF-20).
         "budget_item_id",
+        # Spec 009: tarjeta, cuotas y mes de la primera cuota, nulos si no es
+        # una compra con tarjeta (RF-18).
+        "card_id",
+        "installments",
+        "first_due_period",
     }
 
 
@@ -614,7 +626,7 @@ def test_not_sending_description_keeps_it(
 ) -> None:
     space_id, ana, expense = ana_expense
 
-    patch_expense(client, ana, space_id, expense["id"], {"payment_type": "credit"})
+    patch_expense(client, ana, space_id, expense["id"], {"amount": 15000})
 
     assert read(client, ana, space_id, expense["id"])["description"] == "mercado"
 
@@ -1258,3 +1270,407 @@ def test_listing_and_recent_bring_the_item(plan: Plan) -> None:
     assert listed == [expense]
     assert recent == [expense]
     assert expense["budget_item_id"] == plan.mercado["id"]
+
+
+# --- Compras con tarjeta (spec 009, T4) ---
+
+CARD_REQUIRED = "Un gasto a crédito necesita la tarjeta con la que se pagó."
+NO_ITEM_ON_CARD = (
+    "Una compra con tarjeta no lleva rubro: cuenta en Deudas el mes en que se "
+    "paga la tarjeta. Indica su categoría."
+)
+DESCRIPTION_REQUIRED = (
+    "Una compra con tarjeta necesita una descripción: es el nombre con el que "
+    "sus cuotas salen en Deudas."
+)
+DEBIT_WITHOUT_CARD = "Un gasto a débito no lleva tarjeta ni cuotas."
+INSTALLMENTS_RANGE = "Las cuotas deben ser un número entero de 1 a 48."
+
+# 1 de diciembre de 2026 a mediodía en Bogotá: las compras de noviembre ya
+# no son futuras.
+DECEMBER_1 = datetime(2026, 12, 1, 17, 0, tzinfo=UTC)
+
+
+class Cards(Plan):
+    """Espacio de Ana con la Visa (corte 25, pago 10, 1,90 %), la Master
+    (corte 15, pago 30) y el rubro "Mercado" de noviembre."""
+
+    def __init__(self, client: TestClient, headers: dict[str, str]) -> None:
+        super().__init__(client, headers)
+        self.visa = self.card("Visa", 25, 10)
+        self.master = self.card("Master", 15, 30)
+        self.mercado_noviembre = self.item("Mercado", "Comida", "2026-11")
+
+    def card(self, name: str, cutoff_day: int, due_day: int) -> dict:
+        body = {
+            "name": name,
+            "cutoff_day": cutoff_day,
+            "due_day": due_day,
+            "monthly_rate": 1.9,
+        }
+        return self.client.post(
+            f"/spaces/{self.space_id}/cards", json=body, headers=self.headers
+        ).json()
+
+    def purchase(self, **fields: object):
+        """La "Compra TV" del 12 de noviembre con la Visa, salvo otro dato."""
+        body = {
+            "payment_type": "credit",
+            "card_id": self.visa["id"],
+            "category_id": self.categories["Hogar"],
+            "description": "Compra TV",
+            "amount": 1200000,
+            "spent_on": "2026-11-12",
+            **fields,
+        }
+        return self.client.post(
+            f"/spaces/{self.space_id}/expenses",
+            json={k: v for k, v in body.items() if v is not None},
+            headers=self.headers,
+        )
+
+
+@pytest.fixture
+def cards(client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch) -> Cards:
+    monkeypatch.setattr(dates, "now", lambda: DECEMBER_1)
+    return Cards(client, login("ana@example.com"))
+
+
+def test_a_card_purchase_is_registered_with_its_payment_month(cards: Cards) -> None:
+    # RF-9, RF-13, RF-18: corte 25 y pago 10, compra del 12 de noviembre →
+    # primera cuota en diciembre.
+    response = cards.purchase(installments=6)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["card_id"] == cards.visa["id"]
+    assert body["installments"] == 6
+    assert body["first_due_period"] == "2026-12"
+    assert body["budget_item_id"] is None
+    assert body["category_id"] == cards.categories["Hogar"]
+    assert body["description"] == "Compra TV"
+
+
+def test_a_card_purchase_has_one_installment_by_default(cards: Cards) -> None:
+    body = cards.purchase(spent_on="2026-11-26").json()
+
+    assert body["installments"] == 1
+    # Después del corte del 25: entra al corte de diciembre y se paga en enero.
+    assert body["first_due_period"] == "2027-01"
+
+
+def test_a_debit_expense_has_no_card_fields(cards: Cards) -> None:
+    body = cards.register(category_id=cards.categories["Salud"]).json()
+
+    assert (body["card_id"], body["installments"], body["first_due_period"]) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"card_id": None}, CARD_REQUIRED),
+        ({"description": None}, DESCRIPTION_REQUIRED),
+        ({"description": "   "}, DESCRIPTION_REQUIRED),
+        ({"category_id": None}, "Una compra con tarjeta necesita su categoría."),
+        ({"installments": 0}, INSTALLMENTS_RANGE),
+        ({"installments": 49}, INSTALLMENTS_RANGE),
+        ({"installments": "3"}, INSTALLMENTS_RANGE),
+        ({"installments": 3.0}, INSTALLMENTS_RANGE),
+        ({"installments": True}, INSTALLMENTS_RANGE),
+        ({"payment_type": "debit"}, DEBIT_WITHOUT_CARD),
+    ],
+)
+def test_an_invalid_card_purchase_is_rejected(
+    cards: Cards, engine: Engine, fields: dict, message: str
+) -> None:
+    # Criterio 6 (RF-9 a RF-11).
+    before = count_expenses(engine)
+
+    response = cards.purchase(**fields)
+
+    assert response.status_code == 422
+    assert message in response.text
+    assert count_expenses(engine) == before
+
+
+def test_a_card_purchase_with_a_budget_item_is_rejected(
+    cards: Cards, engine: Engine
+) -> None:
+    response = cards.purchase(budget_item_id=cards.mercado_noviembre["id"])
+
+    assert response.status_code == 422
+    assert NO_ITEM_ON_CARD in response.text
+    assert count_expenses(engine) == 0
+
+
+def test_a_debit_expense_with_installments_is_rejected(cards: Cards) -> None:
+    response = cards.register(category_id=cards.categories["Salud"], installments=1)
+
+    assert response.status_code == 422
+    assert DEBIT_WITHOUT_CARD in response.text
+
+
+def test_an_archived_card_cannot_take_new_purchases(
+    cards: Cards, engine: Engine
+) -> None:
+    cards.client.delete(
+        f"/spaces/{cards.space_id}/cards/{cards.visa['id']}", headers=cards.headers
+    )
+
+    response = cards.purchase()
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "La tarjeta «Visa» fue eliminada. Para usarla de nuevo, créala otra vez "
+        "con el mismo nombre."
+    )
+    assert count_expenses(engine) == 0
+
+
+@pytest.mark.parametrize("other_space", [True, False])
+def test_a_card_of_another_space_or_missing_is_rejected(
+    cards: Cards, engine: Engine, other_space: bool
+) -> None:
+    # RF-12, RF-43: Ana es miembro de los dos espacios y aun así la tarjeta del
+    # otro no sirve; responde igual que una inexistente.
+    if other_space:
+        viajes = cards.client.post(
+            "/spaces", json={"name": "Viajes"}, headers=cards.headers
+        ).json()
+        body = {"name": "Amex", "cutoff_day": 1, "due_day": 15}
+        card_id = cards.client.post(
+            f"/spaces/{viajes['id']}/cards", json=body, headers=cards.headers
+        ).json()["id"]
+    else:
+        card_id = 999
+
+    response = cards.purchase(card_id=card_id)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "La tarjeta no existe en este espacio."
+    assert count_expenses(engine) == 0
+
+
+def test_the_description_of_a_card_purchase_cannot_be_removed(cards: Cards) -> None:
+    purchase = cards.purchase().json()
+
+    for description in (None, ""):
+        response = cards.patch(purchase["id"], {"description": description})
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == DESCRIPTION_REQUIRED
+    assert read(cards.client, cards.headers, cards.space_id, purchase["id"]) == purchase
+
+
+def test_editing_the_purchase_recalculates_its_payment_month(cards: Cards) -> None:
+    # Criterio 8, primera parte (RF-5, RF-14, decisión 13).
+    purchase = cards.purchase().json()
+    cards.client.patch(
+        f"/spaces/{cards.space_id}/cards/{cards.visa['id']}",
+        json={"cutoff_day": 5},
+        headers=cards.headers,
+    )
+
+    # Cambiar los días de la tarjeta no mueve la compra, ni editar su
+    # descripción o su categoría.
+    renamed = cards.patch(
+        purchase["id"],
+        {"description": "TV sala", "category_id": cards.categories["Ocio"]},
+    ).json()
+    assert renamed["first_due_period"] == "2026-12"
+
+    # Cambiar la fecha recalcula con el corte nuevo: corte 5 y pago 10 de
+    # noviembre. Con el corte viejo habría seguido en diciembre.
+    moved = cards.patch(purchase["id"], {"spent_on": "2026-11-03"}).json()
+    assert moved["first_due_period"] == "2026-11"
+
+
+def test_changing_card_or_installments_recalculates_the_payment_month(
+    cards: Cards,
+) -> None:
+    purchase = cards.purchase().json()
+
+    # Master: corte 15 y pago 30 → se paga el 30 de noviembre.
+    to_master = cards.patch(purchase["id"], {"card_id": cards.master["id"]}).json()
+    assert to_master["first_due_period"] == "2026-11"
+
+    more = cards.patch(purchase["id"], {"installments": 12}).json()
+    assert (more["installments"], more["first_due_period"]) == (12, "2026-11")
+
+
+def test_patching_to_an_archived_card_is_rejected(cards: Cards) -> None:
+    purchase = cards.purchase().json()
+    cards.client.delete(
+        f"/spaces/{cards.space_id}/cards/{cards.master['id']}", headers=cards.headers
+    )
+
+    response = cards.patch(purchase["id"], {"card_id": cards.master["id"]})
+
+    assert response.status_code == 422
+    assert "fue eliminada" in response.json()["detail"]
+
+
+def test_debit_to_credit_needs_a_card_and_drops_the_item(cards: Cards) -> None:
+    # RF-15.
+    planned = cards.register(
+        budget_item_id=cards.mercado_noviembre["id"],
+        spent_on="2026-11-12",
+        description="Éxito",
+    ).json()
+
+    without_card = cards.patch(planned["id"], {"payment_type": "credit"})
+    keeps_item = cards.patch(
+        planned["id"], {"payment_type": "credit", "card_id": cards.visa["id"]}
+    )
+    assert without_card.json()["detail"] == CARD_REQUIRED
+    assert keeps_item.json()["detail"] == NO_ITEM_ON_CARD
+
+    converted = cards.patch(
+        planned["id"],
+        {
+            "payment_type": "credit",
+            "card_id": cards.visa["id"],
+            "budget_item_id": None,
+        },
+    )
+
+    assert converted.status_code == 200
+    body = converted.json()
+    assert body["budget_item_id"] is None
+    assert body["category_id"] == cards.categories["Comida"]
+    assert (body["installments"], body["first_due_period"]) == (1, "2026-12")
+
+
+def test_debit_to_credit_needs_a_description(cards: Cards) -> None:
+    unplanned = cards.register(
+        category_id=cards.categories["Ocio"], spent_on="2026-11-12"
+    ).json()
+    to_credit = {"payment_type": "credit", "card_id": cards.visa["id"]}
+
+    response = cards.patch(unplanned["id"], to_credit)
+    assert response.json()["detail"] == DESCRIPTION_REQUIRED
+
+    response = cards.patch(unplanned["id"], {**to_credit, "description": "Cine"})
+    assert response.status_code == 200
+    assert response.json()["first_due_period"] == "2026-12"
+
+
+def test_credit_to_debit_drops_the_card(cards: Cards) -> None:
+    purchase = cards.purchase(installments=6).json()
+
+    body = cards.patch(purchase["id"], {"payment_type": "debit"}).json()
+
+    assert (body["card_id"], body["installments"], body["first_due_period"]) == (
+        None,
+        None,
+        None,
+    )
+    assert body["budget_item_id"] is None
+    assert body["category_id"] == cards.categories["Hogar"]
+
+
+def test_credit_to_debit_can_go_into_an_item(cards: Cards) -> None:
+    purchase = cards.purchase().json()
+
+    body = cards.patch(
+        purchase["id"],
+        {"payment_type": "debit", "budget_item_id": cards.mercado_noviembre["id"]},
+    ).json()
+
+    assert body["budget_item_id"] == cards.mercado_noviembre["id"]
+    assert body["category_id"] == cards.categories["Comida"]
+    assert body["card_id"] is None
+
+
+def test_a_debit_expense_cannot_get_a_card_while_staying_debit(cards: Cards) -> None:
+    unplanned = cards.register(category_id=cards.categories["Ocio"]).json()
+
+    for body in ({"card_id": cards.visa["id"]}, {"installments": 3}):
+        response = cards.patch(unplanned["id"], body)
+        assert response.status_code == 422
+        assert response.json()["detail"] == DEBIT_WITHOUT_CARD
+
+
+def legacy_credit_expense(engine: Engine, cards: Cards, **fields: object) -> int:
+    """Gasto a crédito sin tarjeta, como los registrados antes de la 009."""
+    with Session(engine) as db:
+        expense = Expense(
+            **{
+                "space_id": cards.space_id,
+                "category_id": cards.categories["Comida"],
+                "created_by": 1,
+                "amount": 90000,
+                "payment_type": "credit",
+                "spent_on": date(2026, 11, 2),
+                **fields,
+            }
+        )
+        db.add(expense)
+        db.commit()
+        return expense.id
+
+
+def test_a_legacy_credit_expense_is_edited_without_a_card(
+    cards: Cards, engine: Engine
+) -> None:
+    # Criterio 5, parte de gastos (RF-17).
+    expense_id = legacy_credit_expense(engine, cards)
+
+    edited = cards.patch(
+        expense_id,
+        {"amount": 95000, "budget_item_id": cards.mercado_noviembre["id"]},
+    )
+
+    assert edited.status_code == 200
+    body = edited.json()
+    assert body["payment_type"] == "credit"
+    assert body["budget_item_id"] == cards.mercado_noviembre["id"]
+    assert body["card_id"] is None
+
+
+def test_a_legacy_credit_expense_becomes_a_card_purchase(
+    cards: Cards, engine: Engine
+) -> None:
+    expense_id = legacy_credit_expense(
+        engine,
+        cards,
+        budget_item_id=cards.mercado_noviembre["id"],
+        description="Mercado viejo",
+    )
+
+    keeps_item = cards.patch(expense_id, {"card_id": cards.visa["id"]})
+    assert keeps_item.json()["detail"] == NO_ITEM_ON_CARD
+
+    converted = cards.patch(
+        expense_id, {"card_id": cards.visa["id"], "budget_item_id": None}
+    ).json()
+    assert converted["card_id"] == cards.visa["id"]
+    assert (converted["installments"], converted["first_due_period"]) == (
+        1,
+        "2026-12",
+    )
+
+
+def test_a_debit_expense_cannot_become_credit_without_a_card(cards: Cards) -> None:
+    # Solo un gasto que ya era a crédito sin tarjeta sigue sin ella (RF-17).
+    unplanned = cards.register(category_id=cards.categories["Ocio"]).json()
+
+    response = cards.patch(unplanned["id"], {"payment_type": "credit"})
+
+    assert response.json()["detail"] == CARD_REQUIRED
+
+
+def test_the_list_uses_the_purchase_date(cards: Cards) -> None:
+    # RF-18: el listado es el registro; el dinero lo cuenta el resumen.
+    purchase = cards.purchase(installments=6).json()
+    base = f"/spaces/{cards.space_id}/expenses"
+
+    november = cards.client.get(f"{base}?period=2026-11", headers=cards.headers)
+    december = cards.client.get(f"{base}?period=2026-12", headers=cards.headers)
+
+    assert november.json() == [purchase]
+    assert december.json() == []

@@ -6,6 +6,7 @@ por accidente el hash de la contraseña (RF-7).
 
 import re
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -14,6 +15,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PlainSerializer,
     StrictInt,
     field_validator,
     model_validator,
@@ -21,6 +23,8 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from app import dates
+from app.installments import Installment
+from app.models import Card
 
 MIN_PASSWORD_LENGTH = 12
 MAX_EMAIL_LENGTH = 320
@@ -266,6 +270,38 @@ EXACTLY_ONE_MESSAGE = (
     "Indica el rubro del gasto o, si no estaba planeado, su categoría, pero no los dos."
 )
 
+# Spec 009: un gasto a crédito lleva tarjeta, descripción y categoría, nunca
+# rubro (RF-9, decisiones 2, 8 y 26); uno a débito, ni tarjeta ni cuotas
+# (RF-10).
+CARD_REQUIRED_MESSAGE = "Un gasto a crédito necesita la tarjeta con la que se pagó."
+NO_ITEM_ON_CARD_MESSAGE = (
+    "Una compra con tarjeta no lleva rubro: cuenta en Deudas el mes en que se "
+    "paga la tarjeta. Indica su categoría."
+)
+DESCRIPTION_REQUIRED_MESSAGE = (
+    "Una compra con tarjeta necesita una descripción: es el nombre con el que "
+    "sus cuotas salen en Deudas."
+)
+CATEGORY_REQUIRED_MESSAGE = "Una compra con tarjeta necesita su categoría."
+DEBIT_WITHOUT_CARD_MESSAGE = "Un gasto a débito no lleva tarjeta ni cuotas."
+MAX_INSTALLMENTS = 48
+
+
+def check_installments(value: object) -> object:
+    # Entero de 1 a 48 (RF-11, decisión 10). Estricto: ni `"3"`, ni `3.0`, ni
+    # `true`.
+    valid = isinstance(value, int) and not isinstance(value, bool)
+    if not valid or not 1 <= value <= MAX_INSTALLMENTS:
+        raise PydanticCustomError(
+            "invalid_installments",
+            "Las cuotas deben ser un número entero de 1 a {max_installments}.",
+            {"max_installments": MAX_INSTALLMENTS},
+        )
+    return value
+
+
+Installments = Annotated[int, BeforeValidator(check_installments)]
+
 
 class ExpenseIn(BaseModel):
     # Sin `space_id` ni `created_by`: salen de la ruta y de la sesión, y si
@@ -280,9 +316,32 @@ class ExpenseIn(BaseModel):
     # `dates.today()` al validar, no al definir la clase (RF-2).
     spent_on: SpentOn = Field(default_factory=lambda: dates.today())
     description: Description = None
+    # Compra con tarjeta (spec 009). Que la tarjeta exista en el espacio y
+    # esté activa lo comprueba la ruta (RF-12).
+    card_id: StrictInt | None = None
+    installments: Installments | None = None
 
     @model_validator(mode="after")
-    def item_or_category(self) -> "ExpenseIn":
+    def payment_rules(self) -> "ExpenseIn":
+        if self.payment_type == "credit":
+            if self.card_id is None:
+                raise PydanticCustomError("card_required", CARD_REQUIRED_MESSAGE)
+            if self.budget_item_id is not None:
+                raise PydanticCustomError("no_item_on_card", NO_ITEM_ON_CARD_MESSAGE)
+            if self.description is None:
+                raise PydanticCustomError(
+                    "description_required", DESCRIPTION_REQUIRED_MESSAGE
+                )
+            if self.category_id is None:
+                raise PydanticCustomError(
+                    "category_required", CATEGORY_REQUIRED_MESSAGE
+                )
+            if self.installments is None:
+                self.installments = 1
+            return self
+
+        if self.card_id is not None or self.installments is not None:
+            raise PydanticCustomError("debit_without_card", DEBIT_WITHOUT_CARD_MESSAGE)
         if (self.budget_item_id is None) == (self.category_id is None):
             raise PydanticCustomError("item_or_category", EXACTLY_ONE_MESSAGE)
         return self
@@ -299,8 +358,20 @@ class ExpensePatch(BaseModel):
     # `null` también vale: quita el rubro y el gasto queda no planeado (RF-21
     # de la 008). Las reglas que cruzan campos las aplica la ruta.
     budget_item_id: StrictInt | None = None
+    # Spec 009. Para quitarle la tarjeta a una compra se cambia a débito, así
+    # que `null` no vale (RF-15).
+    card_id: StrictInt | None = None
+    installments: Installments | None = None
 
-    @field_validator("amount", "payment_type", "category_id", "spent_on", mode="before")
+    @field_validator(
+        "amount",
+        "payment_type",
+        "category_id",
+        "spent_on",
+        "card_id",
+        "installments",
+        mode="before",
+    )
     @classmethod
     def reject_null(cls, value: object) -> object:
         # Sin esto, `None` pasaría por el `| None` del tipo y el gasto se
@@ -329,6 +400,17 @@ class ExpenseOut(BaseModel):
     created_at: datetime
     # Nulo si no estaba planeado (RF-20 de la 008).
     budget_item_id: int | None
+    # Compra con tarjeta (spec 009, RF-18): nulos si no lo es. El mes de la
+    # primera cuota sale como `AAAA-MM`, como los periodos.
+    card_id: int | None
+    installments: int | None
+    first_due_period: Annotated[
+        str | None,
+        # `month_of` se define más abajo, con los periodos: la lambda lo busca
+        # al validar, no al definir la clase.
+        BeforeValidator(lambda value: month_of(value)),
+        Field(validation_alias="first_due_start"),
+    ]
 
 
 # --- Periodo (spec 004) ---
@@ -511,13 +593,54 @@ class CategorySummaryOut(BaseModel):
 
 class TotalSummaryOut(BaseModel):
     income: int
+    # Desde la 009: lo planeado en rubros más las deudas del mes (RF-38).
     planned: int
+    # Deudas de todas las tarjetas en el mes (spec 009, RF-35).
+    debts: int
     spent_planned: int
     spent_unplanned: int
+    # Desde la 009: gastado en rubros más no planeado más las deudas (RF-38).
     spent: int
     # Ingresos menos planeado, y ingresos menos gastado: pueden ser negativos.
     unassigned: int
     balance: int
+
+
+class DebtInstallmentOut(BaseModel):
+    """Cuota de una compra que se paga en el mes (spec 009, RF-36)."""
+
+    expense_id: int
+    # La descripción de la compra (decisión 23).
+    name: str
+    number: int
+    count: int
+    capital: int
+    interest: int
+    amount: int
+
+
+class DebtPrepaymentOut(BaseModel):
+    id: int
+    expense_id: int
+    name: str
+    amount: int
+
+
+class CardDebtOut(BaseModel):
+    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36)."""
+
+    card_id: int
+    name: str
+    # Una archivada sale si tiene algo en el mes (decisión 21).
+    deleted: bool
+    installments: list[DebtInstallmentOut]
+    prepayments: list[DebtPrepaymentOut]
+    # Suma de las cuotas del mes, con intereses estimados.
+    estimated: int
+    # Valor real del extracto, o nulo si no se escribió.
+    statement: int | None
+    # El valor real o lo estimado, más los abonos del mes.
+    amount: int
 
 
 class SummaryOut(BaseModel):
@@ -525,6 +648,9 @@ class SummaryOut(BaseModel):
     incomes: list[IncomeSummaryOut]
     budget_items: list[ItemSummaryOut]
     categories: list[CategorySummaryOut]
+    # Spec 009: una entrada por tarjeta con cuotas, abonos o valor real en el
+    # mes (RF-36).
+    debts: list[CardDebtOut]
     total: TotalSummaryOut
 
 
@@ -540,3 +666,296 @@ class PlanCopyOut(BaseModel):
     # rubros omitidos (RF-13).
     summary: SummaryOut
     skipped: list[SkippedItemOut]
+
+
+# --- Tarjetas (spec 009) ---
+
+MAX_CARD_NAME_LENGTH = 50
+MAX_RATE = Decimal(10)
+RATE_MESSAGE = (
+    "La tasa mensual debe ser un número de 0.01 a 10 con hasta dos decimales, "
+    "por ejemplo 1.89."
+)
+
+
+def check_card_name(value: str) -> str:
+    # Como las categorías: sin espacios alrededor y de 1 a 50 caracteres
+    # (RF-2).
+    name = value.strip()
+    if not 1 <= len(name) <= MAX_CARD_NAME_LENGTH:
+        raise PydanticCustomError(
+            "invalid_card_name",
+            "El nombre de la tarjeta debe tener entre 1 y {max_length} caracteres.",
+            {"max_length": MAX_CARD_NAME_LENGTH},
+        )
+    return name
+
+
+def card_day(label: str) -> BeforeValidator:
+    """Día de corte o de pago: entero de 1 a 31 (RF-3). Estricto: ni `"5"` ni
+    `5.0` ni `true` son un día."""
+
+    def check(value: object) -> object:
+        valid = isinstance(value, int) and not isinstance(value, bool)
+        if not valid or not 1 <= value <= 31:
+            raise PydanticCustomError(
+                "invalid_card_day", f"El {label} debe ser un número entero de 1 a 31."
+            )
+        return value
+
+    return BeforeValidator(check)
+
+
+def parse_rate(value: object) -> object:
+    """Tasa mensual en porcentaje: número de 0,01 a 10 con hasta dos decimales
+    (RF-3, decisión 27). Se convierte a `Decimal` y nunca se calcula con
+    `float`.
+
+    El JSON llega a Python como `float` (`1.89`); `str()` da el número tal
+    como se escribió, porque Python muestra el decimal más corto que vuelve
+    al mismo `float`, y de ahí sale un `Decimal` exacto. Texto y booleanos se
+    rechazan, como en los montos.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise PydanticCustomError("invalid_rate", RATE_MESSAGE)
+    rate = Decimal(str(value))
+    # `as_tuple().exponent` es -2 para 1.89 y -3 para 1.895.
+    if not 0 < rate <= MAX_RATE or rate.as_tuple().exponent < -2:
+        raise PydanticCustomError("invalid_rate", RATE_MESSAGE)
+    return rate
+
+
+def rate_to_bp(rate: Decimal | None) -> int | None:
+    """De porcentaje a puntos básicos, como se guarda: 1.89 → 189."""
+    return None if rate is None else int(rate * 100)
+
+
+def rate_from_bp(rate_bp: int | None) -> Decimal | None:
+    return None if rate_bp is None else Decimal(rate_bp) / 100
+
+
+def rate_number(rate: Decimal | None) -> float | int | None:
+    # Sale como número JSON (`1.89`) y no como texto, que es lo que Pydantic
+    # hace con un `Decimal`. Solo es para mostrarla: ningún cálculo usa este
+    # `float`.
+    if rate is None:
+        return None
+    return int(rate) if rate == rate.to_integral_value() else float(rate)
+
+
+CardName = Annotated[str, AfterValidator(check_card_name)]
+CutoffDay = Annotated[int, card_day("día de corte")]
+DueDay = Annotated[int, card_day("día límite de pago")]
+MonthlyRate = Annotated[Decimal | None, BeforeValidator(parse_rate)]
+RateOut = Annotated[Decimal | None, PlainSerializer(rate_number)]
+
+
+class CardIn(BaseModel):
+    name: CardName
+    cutoff_day: CutoffDay
+    due_day: DueDay
+    monthly_rate: MonthlyRate = None
+
+
+class CardPatch(BaseModel):
+    # La ruta aplica solo `model_fields_set` (RF-5).
+    name: CardName | None = None
+    cutoff_day: CutoffDay | None = None
+    due_day: DueDay | None = None
+    # `null` aquí sí vale: quita la tasa.
+    monthly_rate: MonthlyRate = None
+
+    _no_nulls = field_validator("name", "cutoff_day", "due_day", mode="before")(
+        reject_nulls
+    )
+
+
+class CardOut(BaseModel):
+    id: int
+    name: str
+    cutoff_day: int
+    due_day: int
+    monthly_rate: RateOut
+    # Una archivada sale en Deudas, en su estado y al editarla (decisión 21).
+    deleted: bool
+
+    @classmethod
+    def of(cls, card: Card) -> "CardOut":
+        return cls(
+            id=card.id,
+            name=card.name,
+            cutoff_day=card.cutoff_day,
+            due_day=card.due_day,
+            monthly_rate=rate_from_bp(card.monthly_rate_bp),
+            deleted=card.deleted_at is not None,
+        )
+
+
+class CardDeletedOut(BaseModel):
+    # Con el aviso de que sus cuotas siguen llegando y cómo volver a usarla
+    # (RF-6), que la web muestra tal cual.
+    id: int
+    name: str
+    message: str
+
+
+# --- Cuotas, abonos y valor real del extracto (spec 009) ---
+
+
+class InstallmentOut(BaseModel):
+    """Una cuota de una compra con tarjeta (RF-21). `count` es el total de
+    cuotas tras los abonos."""
+
+    number: int
+    count: int
+    period: str
+    capital: int
+    interest: int
+    amount: int
+    balance_after: int
+
+    @classmethod
+    def of(cls, row: Installment) -> "InstallmentOut":
+        return cls(
+            number=row.number,
+            count=row.count,
+            period=row.period,
+            capital=row.capital,
+            interest=row.interest,
+            amount=row.amount,
+            balance_after=row.balance_after,
+        )
+
+
+class PrepaymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    expense_id: int
+    period: PeriodOut
+    amount: int
+    reduces: str
+
+
+class ScheduleOut(BaseModel):
+    """Plan de cuotas de una compra con sus abonos (RF-21)."""
+
+    expense_id: int
+    card_id: int
+    installments: list[InstallmentOut]
+    prepayments: list[PrepaymentOut]
+
+
+def check_statement_amount(value: object) -> object:
+    # Entero de 0 a un billón (RF-31, decisión 20). A diferencia del monto de
+    # un gasto, `0` vale: un mes en que la tarjeta no cobró nada.
+    valid = isinstance(value, int) and not isinstance(value, bool)
+    if not valid or not 0 <= value <= MAX_AMOUNT:
+        raise PydanticCustomError(
+            "invalid_statement_amount",
+            "El valor del extracto debe ser un número entero de 0 a {max_amount}.",
+            {"max_amount": MAX_AMOUNT},
+        )
+    return value
+
+
+class StatementIn(BaseModel):
+    amount: Annotated[int, BeforeValidator(check_statement_amount)]
+
+
+class StatementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    card_id: int
+    period: PeriodOut
+    amount: int
+
+
+def check_reduces(value: object) -> object:
+    if value not in ("installment", "term"):
+        raise PydanticCustomError(
+            "invalid_reduces",
+            "Indica si el abono baja la cuota (installment) o el plazo (term).",
+        )
+    return value
+
+
+class PrepaymentIn(BaseModel):
+    # Mismas reglas que el monto de un gasto (RF-23).
+    amount: Amount
+    # Cualquier mes con cuota y saldo después, también futuro (decisión 19).
+    period: Period = Field(default_factory=current_period)
+    reduces: Annotated[Literal["installment", "term"], BeforeValidator(check_reduces)]
+
+
+class PrepaymentCreatedOut(BaseModel):
+    # El abono y el plan de cuotas nuevo de la compra (RF-22).
+    prepayment: PrepaymentOut
+    schedule: ScheduleOut
+
+
+def format_pesos(amount: int) -> str:
+    """Monto con punto de miles, como se escribe en Colombia: 1.000.000."""
+    return f"{amount:,}".replace(",", ".")
+
+
+class PayoffIn(BaseModel):
+    # Mes en que se paga todo; por defecto el actual (RF-29).
+    period: Period = Field(default_factory=current_period)
+
+
+class PayoffOut(BaseModel):
+    period: str
+    # Un abono por cada compra saldada.
+    prepayments: list[PrepaymentOut]
+    # La deuda de la tarjeta en ese mes, con los abonos nuevos (RF-35).
+    debt: int
+
+
+# --- Estado de la tarjeta y simulación (spec 009, RF-40, RF-41) ---
+
+
+class CardPurchaseStatusOut(BaseModel):
+    """Compra con cuotas del mes actual en adelante."""
+
+    expense_id: int
+    name: str
+    amount: int
+    spent_on: date
+    # Total de cuotas, tras los abonos.
+    count: int
+    # Primera cuota pendiente.
+    next_number: int
+    # Capital que falta pagar, desde el mes actual.
+    balance: int
+
+
+class CardMonthOut(BaseModel):
+    period: str
+    estimated: int
+    statement: int | None
+    prepayments: int
+    amount: int
+
+
+class CardStatusOut(BaseModel):
+    card: CardOut
+    # Capital pendiente de todas las compras, desde el mes actual (RF-40).
+    balance: int
+    purchases: list[CardPurchaseStatusOut]
+    # Deuda de cada mes desde el actual hasta el último con algo.
+    months: list[CardMonthOut]
+
+
+class SimulationIn(BaseModel):
+    # Las mismas validaciones que registrar la compra (RF-41).
+    amount: Amount
+    installments: Installments = 1
+    spent_on: SpentOn = Field(default_factory=lambda: dates.today())
+
+
+class SimulationOut(BaseModel):
+    first_due_period: str
+    installments: list[InstallmentOut]

@@ -31,8 +31,22 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
 - **Gasto** (`expense`): dinero que salió. Tiene monto, tipo de pago, fecha,
   descripción opcional y el usuario que lo registró. Si estaba planeado, va
   en un rubro de su mes y usa su categoría; si no, lleva su propia
-  categoría.
+  categoría. Un gasto a crédito es una compra con tarjeta.
 - **Tipo de pago** (`payment_type`): `credit` o `debit`.
+- **Tarjeta** (`card`): tarjeta de crédito del espacio, con día de corte, día
+  límite de pago y tasa mensual opcional. Eliminarla la archiva, y crearla
+  de nuevo la restaura.
+- **Compra con tarjeta**: gasto a crédito con tarjeta, cuotas, descripción
+  obligatoria y categoría, sin rubro. Cuenta en Deudas en los meses en que
+  se pagan sus cuotas, no el día de la compra.
+- **Cuota** (`installment`): la parte de una compra que se paga en un mes,
+  con capital fijo e interés estimado sobre el saldo.
+- **Abono** (`prepayment`): pago extra a una compra en un mes, que baja la
+  cuota o el plazo. "Pagar todo" salda con abonos las compras del extracto.
+- **Valor del extracto** (`card_statement`): lo que de verdad cobra una
+  tarjeta en un mes; reemplaza la estimación.
+- **Deuda** (`debt`): lo que cobra una tarjeta en un mes: el valor del
+  extracto o lo estimado, más los abonos.
 - **Categoría** (`category`): agrupa rubros y gastos (hogar, transporte,
   comida...). Eliminarla la archiva: lo que ya la tenía la conserva, y
   crearla de nuevo la restaura.
@@ -45,7 +59,8 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
 - **Periodo** (`period`): un mes calendario en la zona horaria configurada,
   con formato `YYYY-MM`.
 - **Resumen** (`summary`): ingresos, planeado vs. gastado por rubro y por
-  categoría, sin asignar y balance de un periodo, dentro de un espacio.
+  categoría, deudas de las tarjetas, sin asignar y balance de un periodo,
+  dentro de un espacio.
 
 Las reglas concretas de cada concepto están en las specs. Si una regla no
 está escrita, pregunta en lugar de suponer.

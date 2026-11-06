@@ -60,3 +60,42 @@ def test_previous_period(period: str, previous: str) -> None:
 def test_previous_period_rejects_invalid_period() -> None:
     with pytest.raises(ValueError):
         dates.previous_period("2026-13")
+
+
+@pytest.mark.parametrize(
+    ("period", "months", "shifted"),
+    [
+        ("2026-11", 2, "2027-01"),
+        ("2026-01", -1, "2025-12"),
+        ("2026-11", 0, "2026-11"),
+        ("2026-12", -47, "2023-01"),
+        ("2026-05", 12, "2027-05"),
+    ],
+)
+def test_shift_period(period: str, months: int, shifted: str) -> None:
+    # Spec 009: la cuota k cae k - 1 meses después del mes de pago (RF-13).
+    assert dates.shift_period(period, months) == shifted
+
+
+@pytest.mark.parametrize(
+    ("spent_on", "cutoff_day", "due_day", "period"),
+    [
+        # Criterio 1 de la 009. Una compra el día de corte entra en ese corte.
+        (date(2026, 11, 25), 25, 10, "2026-12"),
+        (date(2026, 11, 26), 25, 10, "2027-01"),
+        # Corte 15 y pago 30: se paga el mismo mes de la compra.
+        (date(2026, 11, 10), 15, 30, "2026-11"),
+        # Febrero no tiene día 30: el pago es el último día, el 28.
+        (date(2027, 2, 10), 15, 30, "2027-02"),
+        # Mismo día de corte y de pago: el pago es el del mes siguiente.
+        (date(2026, 11, 10), 10, 10, "2026-12"),
+        # Abril no tiene día 31: el corte es el 30.
+        (date(2026, 4, 30), 31, 5, "2026-05"),
+        # Diciembre pasa al año siguiente.
+        (date(2026, 12, 26), 25, 10, "2027-02"),
+    ],
+)
+def test_first_due_period(
+    spent_on: date, cutoff_day: int, due_day: int, period: str
+) -> None:
+    assert dates.first_due_period(spent_on, cutoff_day, due_day) == period

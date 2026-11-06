@@ -1,7 +1,7 @@
 # Roadmap — gastito
 
 > **Fase actual:** 1 — Aplicación y SDD
-> **Spec activa:** 009-tarjetas-y-cuotas
+> **Spec activa:** 010-app-web
 >
 > Este es el único lugar donde se actualiza el estado del proyecto.
 
@@ -32,13 +32,18 @@ está validada. Marca con [x] las specs terminadas.
     con Alembic** con un ADR que reemplaza al 0004 y otro que reemplaza al
     0008. La primera migración decide qué pasa con las tablas de Telegram
     que dejan las bases ya creadas (spec 007).
-- [ ] 009-tarjetas-y-cuotas — Tarjetas con corte, pago y tasa; compras a cuotas y la deuda que llega cada mes.
-  - Una compra a 1 cuota cuenta en su rubro el mes de la compra. Una a
-    varias cuotas no se descuenta de su rubro: cada cuota entra en Deudas
-    el mes en que se paga. El mes del pago sale del día de corte.
+- [x] 009-tarjetas-y-cuotas — Tarjetas con corte, pago y tasa; compras a cuotas y la deuda que llega cada mes.
+  - Toda compra con tarjeta, también a 1 cuota, cuenta el mes en que se
+    paga la tarjeta, no el de la compra: cada cuota entra en Deudas ese
+    mes. Lleva categoría, pero no rubro. El mes del pago sale del día de
+    corte y del día límite de pago. Antes decía que la compra a 1 cuota
+    contaba en su rubro el mes de la compra; se cambió en la clarificación
+    (2026-11-06).
   - Los intereses son una estimación con la tasa mensual de la tarjeta, que
     es opcional. Al planear se escribe el valor real del extracto.
-  - Fuera: abonar o cancelar antes de tiempo una compra a cuotas.
+  - Entran los abonos a una compra, que bajan la cuota o el plazo, y
+    cancelarla antes de tiempo. El roadmap los dejaba fuera; se cambió en
+    la clarificación (2026-11-06).
 - [ ] 010-app-web — Entrar y registrarse, registrar gastos desde el celular, fijarla en la pantalla de inicio y diseño responsive.
   - **Se fija desde el navegador, no se instala ni se descarga.** En el
     celular se usa "Añadir a pantalla de inicio" (Safari en iPhone, Chrome

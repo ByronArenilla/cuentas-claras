@@ -1,4 +1,9 @@
-"""Resumen del plan de un mes (spec 008, RF-23 a RF-25; reemplaza al de la 004).
+"""Resumen del plan de un mes (spec 008, RF-23 a RF-25; reemplaza al de la 004),
+con las deudas de las tarjetas (spec 009, RF-36 a RF-39).
+
+Las compras con tarjeta no cuentan en su rubro ni en su categoría: cuentan
+como Deudas en los meses en que se pagan sus cuotas (decisiones 1 y 6 de la
+009).
 
 Funciones sin nada de HTTP, que se prueban con una sesión de base de datos
 (principio 10). Todas las consultas filtran por `space_id` (RF-29).
@@ -10,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import dates
+from app.debts import card_debts
 from app.models import BudgetItem, Category, Expense, Income
 from app.schemas import (
     CategorySummaryOut,
@@ -26,12 +32,15 @@ def spent_by_category(
     """Suma de los gastos de cada categoría con `start <= spent_on < end`,
     planeados o no, con la regla de periodo de la 003 (RF-9 de la 003).
 
-    Las categorías sin gastos no aparecen.
+    Las categorías sin gastos no aparecen. Las compras con tarjeta no cuentan:
+    van a Deudas (RF-37 de la 009). Un gasto a crédito sin tarjeta, de antes
+    de la 009, sí cuenta el día del gasto.
     """
     rows = db.execute(
         select(Expense.category_id, func.sum(Expense.amount))
         .where(
             Expense.space_id == space_id,
+            Expense.card_id.is_(None),
             Expense.spent_on >= start,
             Expense.spent_on < end,
         )
@@ -120,20 +129,28 @@ def build_summary(db: Session, space_id: int, period: str) -> SummaryOut:
             )
         )
 
+    debts = card_debts(db, space_id, period)
+    debt_total = sum(row.amount for row in debts)
+
     income = sum(row.amount for row in incomes)
-    planned = sum(row.planned for row in items)
+    # La deuda del mes cuenta sola en lo planeado y en lo gastado (decisión 3
+    # de la 009, RF-38).
+    planned = sum(row.planned for row in items) + debt_total
     spent_planned = sum(spent_items.values())
-    spent = sum(spent_categories.values())
+    spent_own_day = sum(spent_categories.values())
+    spent = spent_own_day + debt_total
     return SummaryOut(
         period=period,
         incomes=incomes,
         budget_items=items,
         categories=categories,
+        debts=debts,
         total=TotalSummaryOut(
             income=income,
             planned=planned,
+            debts=debt_total,
             spent_planned=spent_planned,
-            spent_unplanned=spent - spent_planned,
+            spent_unplanned=spent_own_day - spent_planned,
             spent=spent,
             unassigned=income - planned,
             balance=income - spent,
