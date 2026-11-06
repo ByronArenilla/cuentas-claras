@@ -1,6 +1,6 @@
 # Tareas 011 — App web
 
-- Spec: `spec.md` (borrador) · Plan: `plan.md` (borrador)
+- Spec: `spec.md` (aprobada) · Plan: `plan.md` (aprobado)
 - Regla: una tarea por vez, primero los tests y luego el código. Al
   terminarla, marcarla, ejecutar `make test` y `make lint`, y detenerse.
 - Orden: primero la API (T1, T2) y el servidor de la web (T3), luego la
@@ -146,8 +146,10 @@ categoría, descripción obligatoria y la simulación.
   - `buildExpense` a crédito con tarjeta, cuotas, categoría y descripción;
     sin descripción, el estado dice qué falta.
   - A 1 cuota aparece "¿Estaba en el plan de este mes?" con "Sí, es del
-    mes" por defecto: con "Sí" se comporta como un débito (sugiere rubros);
-    con "No", o con 2 cuotas o más, es deuda (spec 010, decisión 26).
+    mes" y "No, es una deuda" sin ninguna marcada: sin elegir, el estado no
+    deja enviar y dice qué falta. Con "Sí" se comporta como un débito
+    (sugiere rubros); con "No", o con 2 cuotas o más, es deuda (spec 010,
+    decisión 26).
   - Cuotas de las opciones rápidas y escritas (1 a 48; `0` y `49` no).
   - Cuándo se pide la simulación: con monto, tarjeta y cuotas; de nuevo al
     cambiar cualquiera o la fecha; no sin monto.
@@ -167,8 +169,8 @@ categoría, descripción obligatoria y la simulación.
 - Test primero (`expenses-list.test.js` y `expense-form.test.js`):
   - Agrupar por día del más reciente al más antiguo y el total del mes.
   - "Solo los míos" deja los de `created_by` igual al usuario.
-  - El texto de cada gasto: rubro o descripción, y "Débito" o "Visa · 6
-    cuotas · desde dic".
+  - El texto de cada gasto: rubro o descripción, y "Débito", "Visa · del
+    mes · se paga en dic" o "Visa · deuda · 6 cuotas desde dic".
   - `buildChanges` envía solo lo que cambió; quitar el rubro envía
     `budget_item_id: null` con la categoría.
   - Una compra con abonos marca como bloqueados todos los campos menos qué

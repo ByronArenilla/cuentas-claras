@@ -1,9 +1,9 @@
 # Plan 011 — App web
 
-- Spec: `spec.md` (estado: borrador)
+- Spec: `spec.md` (estado: aprobada)
 - Servicios afectados: `services/web` (nuevo) y `services/api` (CORS y
   sesión renovable)
-- Estado: borrador (2026-11-06)
+- Estado: aprobado (2026-11-06)
 
 La web es HTML, CSS y módulos de JavaScript nativos, sin framework, sin
 `npm` y sin paso de compilación (roadmap, evaluación del 2026-11-04). El
@@ -179,11 +179,13 @@ Ninguna ruta nueva: la web usa las que ya existen.
 - Débito sin rubro: `{amount, payment_type: "debit", category_id,
   description, spent_on?}`.
 - Crédito como deuda (varias cuotas, o 1 cuota que no estaba en el plan):
-  `{amount, payment_type: "credit", card_id, installments, category_id,
-  description, spent_on?}`.
+  `{amount, payment_type: "credit", card_id, installments, is_debt: true,
+  category_id, description, spent_on?}`.
 - Crédito del mes (1 cuota que estaba en el plan): como un débito, con
-  rubro o con categoría, más `card_id`. Cómo marca la API que es del mes lo
-  define la spec 010; `buildExpense` añade ese campo cuando exista.
+  rubro o con categoría, más `card_id` e `is_debt: false` (spec 010). Se
+  envía `is_debt` siempre, aunque la API lo deduzca, para que el gasto diga
+  lo que la persona eligió.
+- Editar: `is_debt` se manda solo si cambió la respuesta o las cuotas.
 - `spent_on` solo si la fecha no es "Hoy" (RF-13).
 - La comparación de nombres replica `category_key` de la 002: minúsculas,
   sin tildes ni diéresis, la ñ aparte. Los mismos casos de su test.

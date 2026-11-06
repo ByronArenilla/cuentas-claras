@@ -1,7 +1,7 @@
 # Spec 011 — App web
 
 - Fase: 1 — Aplicación y SDD
-- Estado: borrador, pendiente de aprobación (2026-11-06)
+- Estado: aprobada (2026-11-06)
 - Base: spec 001 (usuarios, espacios, sesión e invitaciones; ADR 0003 y
   ADR 0005), spec 003 (gastos), spec 008 (rubros y resumen), spec 009
   (tarjetas, compras a cuotas y simulación), spec 010 (gasto del mes con
@@ -172,10 +172,11 @@ accesibilidad.
     Registrar, Gastos y Espacio. Tres palabras se entienden sin aprender
     íconos, y en el celular caben con su texto completo.
 26. **A crédito y a 1 cuota, la web pregunta "¿Estaba en el plan de este
-    mes?"** con dos respuestas: "Sí, es del mes" (por defecto) y "No, es una
-    deuda". La pregunta desaparece al elegir 2 cuotas o más. Lo pide la
-    spec 010, que define cómo lo recibe la API; esta spec solo pone la
-    pregunta en el formulario. Añadida al cambiar el orden de las specs
+    mes?"** con las dos respuestas a la vista, "Sí, es del mes" y "No, es una
+    deuda", sin ninguna marcada: hasta elegir una, no deja registrar y lo
+    dice junto a la pregunta (aprobación, 2026-11-06). La pregunta
+    desaparece al elegir 2 cuotas o más. La respuesta
+    viaja en `is_debt` (spec 010). Añadida al cambiar el orden de las specs
     (2026-11-06).
 
 ## Requisitos funcionales
@@ -248,9 +249,10 @@ accesibilidad.
   el mes elegido (por defecto el actual), agrupados por día del más
   reciente al más antiguo, y cambiar de mes con flechas (decisión 5).
 - **RF-18** Cada gasto DEBE mostrar qué fue (rubro o descripción), su
-  categoría, su monto y cómo se pagó: débito, o la tarjeta con sus cuotas
-  ("Visa · 6 cuotas · desde dic"). La lista DEBE mostrar el total del mes
-  listado.
+  categoría, su monto y cómo se pagó: débito, la tarjeta como gasto del mes
+  ("Visa · del mes · se paga en dic") o la tarjeta como deuda con sus
+  cuotas ("Visa · deuda · 6 cuotas desde dic"). La lista DEBE mostrar el
+  total del mes listado.
 - **RF-19** El filtro "Solo los míos" DEBE dejar solo los gastos que
   registró quien usa la app.
 - **RF-20** CUANDO se abre un gasto, la web DEBE mostrar el formulario de
