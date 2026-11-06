@@ -75,9 +75,16 @@ def test_amount_survives_json_without_conversion() -> None:
     assert expense.amount == 20000
 
 
-@pytest.mark.parametrize("payment_type", ["credit", "debit"])
-def test_valid_payment_types(payment_type: str) -> None:
-    expense = ExpenseIn.model_validate({**VALID, "payment_type": payment_type})
+@pytest.mark.parametrize(
+    ("payment_type", "extra"),
+    [
+        # Desde la 009, un gasto a crédito lleva tarjeta y descripción.
+        ("credit", {"card_id": 1, "description": "Compra TV"}),
+        ("debit", {}),
+    ],
+)
+def test_valid_payment_types(payment_type: str, extra: dict[str, object]) -> None:
+    expense = ExpenseIn.model_validate({**VALID, "payment_type": payment_type, **extra})
     assert expense.payment_type == payment_type
 
 
@@ -614,7 +621,7 @@ def test_not_sending_description_keeps_it(
 ) -> None:
     space_id, ana, expense = ana_expense
 
-    patch_expense(client, ana, space_id, expense["id"], {"payment_type": "credit"})
+    patch_expense(client, ana, space_id, expense["id"], {"amount": 15000})
 
     assert read(client, ana, space_id, expense["id"])["description"] == "mercado"
 
