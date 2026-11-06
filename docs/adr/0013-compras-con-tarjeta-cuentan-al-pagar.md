@@ -1,7 +1,8 @@
 # ADR 0013 — Las compras con tarjeta cuentan el mes en que se paga la tarjeta
 
 - Fecha: 2026-11-06
-- Estado: aceptada
+- Estado: aceptada; su decisión 1 la cambia el ADR 0014 (un gasto del mes
+  con tarjeta a 1 cuota cuenta el mes de la compra)
 - Fase / spec: 1 / 009-tarjetas-y-cuotas
 
 ## Contexto

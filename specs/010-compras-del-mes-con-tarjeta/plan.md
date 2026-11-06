@@ -7,8 +7,9 @@
 Cambia la lógica de la 009 en tres sitios: la forma de una compra con
 tarjeta (columna nueva y su `CHECK`), las reglas al registrar y editar, y
 el cálculo de Deudas. Una migración (`0005`) añade la columna y marca como
-deuda todo lo que ya existe. La decisión queda en el ADR **0014**, que
-cambia la decisión 1 del 0013.
+deuda todo lo que ya existe. La decisión queda en el
+[ADR 0014](../../docs/adr/0014-compras-del-mes-con-tarjeta.md), que cambia
+la decisión 1 del 0013.
 
 ## Decisiones técnicas
 

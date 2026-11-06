@@ -67,7 +67,7 @@ totales.
 - Hecho cuando: los tests pasan.
 - RF: RF-11; decisión 11.
 
-## [ ] T5 — ADR 0014
+## [x] T5 — ADR 0014
 `docs/adr/0014-compras-del-mes-con-tarjeta.md`, y el 0013 marcado con su
 decisión 1 cambiada por el 0014.
 
