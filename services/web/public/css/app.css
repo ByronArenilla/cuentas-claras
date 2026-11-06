@@ -303,7 +303,8 @@ button {
 }
 
 .row > .seg,
-.row > .chips {
+.row > .chips,
+.row > .button--link {
   justify-self: start;
 }
 
@@ -762,4 +763,15 @@ dialog::backdrop {
   background: var(--ink);
   color: var(--paper);
   border-color: var(--ink);
+}
+
+/* Espacio: secciones separadas por un filete, como capítulos del libro. */
+.spaced {
+  gap: var(--space-7);
+}
+
+.spaced > section + section,
+.spaced > form {
+  padding-top: var(--space-6);
+  border-top: var(--rule-width) solid var(--rule);
 }

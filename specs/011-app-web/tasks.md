@@ -181,7 +181,7 @@ categoría, descripción obligatoria y la simulación.
 - Hecho cuando: los tests pasan y la verificación está marcada.
 - RF: RF-17 a RF-22.
 
-## [ ] T10 — Espacio: cambiar, crear, compartir y salir
+## [x] T10 — Espacio: cambiar, crear, compartir y salir
 `views/space.js`: lista de espacios, crear, compartir, salir y el nombre
 del espacio actual en todas las pantallas.
 
