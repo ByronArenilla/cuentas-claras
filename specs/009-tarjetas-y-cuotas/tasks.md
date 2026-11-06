@@ -81,7 +81,7 @@ montado en `main.py`. `CardIn`, `CardPatch`, `CardOut` y `CardDeletedOut`.
   `{space_id}` sigue en verde.
 - RF: RF-1 a RF-8.
 
-## [ ] T4 — Compras con tarjeta
+## [x] T4 — Compras con tarjeta
 `ExpenseIn`, `ExpensePatch` y `ExpenseOut` con `card_id`, `installments`
 y `first_due_period`, y las rutas de gastos con las reglas de "Editar un
 gasto" del plan (salvo la 1, de abonos, que es de T6).

@@ -269,6 +269,38 @@ EXACTLY_ONE_MESSAGE = (
     "Indica el rubro del gasto o, si no estaba planeado, su categoría, pero no los dos."
 )
 
+# Spec 009: un gasto a crédito lleva tarjeta, descripción y categoría, nunca
+# rubro (RF-9, decisiones 2, 8 y 26); uno a débito, ni tarjeta ni cuotas
+# (RF-10).
+CARD_REQUIRED_MESSAGE = "Un gasto a crédito necesita la tarjeta con la que se pagó."
+NO_ITEM_ON_CARD_MESSAGE = (
+    "Una compra con tarjeta no lleva rubro: cuenta en Deudas el mes en que se "
+    "paga la tarjeta. Indica su categoría."
+)
+DESCRIPTION_REQUIRED_MESSAGE = (
+    "Una compra con tarjeta necesita una descripción: es el nombre con el que "
+    "sus cuotas salen en Deudas."
+)
+CATEGORY_REQUIRED_MESSAGE = "Una compra con tarjeta necesita su categoría."
+DEBIT_WITHOUT_CARD_MESSAGE = "Un gasto a débito no lleva tarjeta ni cuotas."
+MAX_INSTALLMENTS = 48
+
+
+def check_installments(value: object) -> object:
+    # Entero de 1 a 48 (RF-11, decisión 10). Estricto: ni `"3"`, ni `3.0`, ni
+    # `true`.
+    valid = isinstance(value, int) and not isinstance(value, bool)
+    if not valid or not 1 <= value <= MAX_INSTALLMENTS:
+        raise PydanticCustomError(
+            "invalid_installments",
+            "Las cuotas deben ser un número entero de 1 a {max_installments}.",
+            {"max_installments": MAX_INSTALLMENTS},
+        )
+    return value
+
+
+Installments = Annotated[int, BeforeValidator(check_installments)]
+
 
 class ExpenseIn(BaseModel):
     # Sin `space_id` ni `created_by`: salen de la ruta y de la sesión, y si
@@ -283,9 +315,32 @@ class ExpenseIn(BaseModel):
     # `dates.today()` al validar, no al definir la clase (RF-2).
     spent_on: SpentOn = Field(default_factory=lambda: dates.today())
     description: Description = None
+    # Compra con tarjeta (spec 009). Que la tarjeta exista en el espacio y
+    # esté activa lo comprueba la ruta (RF-12).
+    card_id: StrictInt | None = None
+    installments: Installments | None = None
 
     @model_validator(mode="after")
-    def item_or_category(self) -> "ExpenseIn":
+    def payment_rules(self) -> "ExpenseIn":
+        if self.payment_type == "credit":
+            if self.card_id is None:
+                raise PydanticCustomError("card_required", CARD_REQUIRED_MESSAGE)
+            if self.budget_item_id is not None:
+                raise PydanticCustomError("no_item_on_card", NO_ITEM_ON_CARD_MESSAGE)
+            if self.description is None:
+                raise PydanticCustomError(
+                    "description_required", DESCRIPTION_REQUIRED_MESSAGE
+                )
+            if self.category_id is None:
+                raise PydanticCustomError(
+                    "category_required", CATEGORY_REQUIRED_MESSAGE
+                )
+            if self.installments is None:
+                self.installments = 1
+            return self
+
+        if self.card_id is not None or self.installments is not None:
+            raise PydanticCustomError("debit_without_card", DEBIT_WITHOUT_CARD_MESSAGE)
         if (self.budget_item_id is None) == (self.category_id is None):
             raise PydanticCustomError("item_or_category", EXACTLY_ONE_MESSAGE)
         return self
@@ -302,8 +357,20 @@ class ExpensePatch(BaseModel):
     # `null` también vale: quita el rubro y el gasto queda no planeado (RF-21
     # de la 008). Las reglas que cruzan campos las aplica la ruta.
     budget_item_id: StrictInt | None = None
+    # Spec 009. Para quitarle la tarjeta a una compra se cambia a débito, así
+    # que `null` no vale (RF-15).
+    card_id: StrictInt | None = None
+    installments: Installments | None = None
 
-    @field_validator("amount", "payment_type", "category_id", "spent_on", mode="before")
+    @field_validator(
+        "amount",
+        "payment_type",
+        "category_id",
+        "spent_on",
+        "card_id",
+        "installments",
+        mode="before",
+    )
     @classmethod
     def reject_null(cls, value: object) -> object:
         # Sin esto, `None` pasaría por el `| None` del tipo y el gasto se
@@ -332,6 +399,17 @@ class ExpenseOut(BaseModel):
     created_at: datetime
     # Nulo si no estaba planeado (RF-20 de la 008).
     budget_item_id: int | None
+    # Compra con tarjeta (spec 009, RF-18): nulos si no lo es. El mes de la
+    # primera cuota sale como `AAAA-MM`, como los periodos.
+    card_id: int | None
+    installments: int | None
+    first_due_period: Annotated[
+        str | None,
+        # `month_of` se define más abajo, con los periodos: la lambda lo busca
+        # al validar, no al definir la clase.
+        BeforeValidator(lambda value: month_of(value)),
+        Field(validation_alias="first_due_start"),
+    ]
 
 
 # --- Periodo (spec 004) ---

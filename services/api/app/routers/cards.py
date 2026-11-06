@@ -8,6 +8,7 @@ Las rutas reciben el espacio por `member_space`, nunca consultando por
 `space_id` directamente (RF-42; RF-28 y RF-29 de la 001).
 """
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -15,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import dates
 from app.db import get_db
 from app.deps import member_space
 from app.models import Card, Space, category_key, utc_now
@@ -162,3 +164,34 @@ def delete_card(
     return CardDeletedOut(
         id=card.id, name=card.name, message=deleted_message(card.name)
     )
+
+
+def usable_card(db: Session, space_id: int, card_id: int) -> Card:
+    """Tarjeta que se puede elegir para una compra: del espacio y activa.
+    Lanza `422` si no.
+
+    Una de otro espacio responde igual que una inexistente (RF-12). Una
+    archivada es del propio espacio, así que el mensaje puede decir cómo
+    restaurarla, como las categorías (RF-41 de la 008).
+    """
+    card = db.scalar(select(Card).where(Card.id == card_id, Card.space_id == space_id))
+    if card is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "La tarjeta no existe en este espacio.",
+        )
+    if card.deleted_at is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"La tarjeta «{card.name}» fue eliminada. Para usarla de nuevo, "
+            "créala otra vez con el mismo nombre.",
+        )
+    return card
+
+
+def first_due_start(card: Card, spent_on: date) -> date:
+    """Día 1 del mes de pago de la primera cuota de una compra del día
+    `spent_on` con `card`, con los días actuales de la tarjeta (RF-13,
+    decisión 12). Se guarda en la compra (decisión 13)."""
+    period = dates.first_due_period(spent_on, card.cutoff_day, card.due_day)
+    return dates.period_bounds(period)[0]
