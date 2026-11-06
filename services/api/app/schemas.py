@@ -23,6 +23,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from app import dates
+from app.installments import Installment
 from app.models import Card
 
 MIN_PASSWORD_LENGTH = 12
@@ -754,3 +755,75 @@ class CardDeletedOut(BaseModel):
     id: int
     name: str
     message: str
+
+
+# --- Cuotas, abonos y valor real del extracto (spec 009) ---
+
+
+class InstallmentOut(BaseModel):
+    """Una cuota de una compra con tarjeta (RF-21). `count` es el total de
+    cuotas tras los abonos."""
+
+    number: int
+    count: int
+    period: str
+    capital: int
+    interest: int
+    amount: int
+    balance_after: int
+
+    @classmethod
+    def of(cls, row: Installment) -> "InstallmentOut":
+        return cls(
+            number=row.number,
+            count=row.count,
+            period=row.period,
+            capital=row.capital,
+            interest=row.interest,
+            amount=row.amount,
+            balance_after=row.balance_after,
+        )
+
+
+class PrepaymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    expense_id: int
+    period: PeriodOut
+    amount: int
+    reduces: str
+
+
+class ScheduleOut(BaseModel):
+    """Plan de cuotas de una compra con sus abonos (RF-21)."""
+
+    expense_id: int
+    card_id: int
+    installments: list[InstallmentOut]
+    prepayments: list[PrepaymentOut]
+
+
+def check_statement_amount(value: object) -> object:
+    # Entero de 0 a un billón (RF-31, decisión 20). A diferencia del monto de
+    # un gasto, `0` vale: un mes en que la tarjeta no cobró nada.
+    valid = isinstance(value, int) and not isinstance(value, bool)
+    if not valid or not 0 <= value <= MAX_AMOUNT:
+        raise PydanticCustomError(
+            "invalid_statement_amount",
+            "El valor del extracto debe ser un número entero de 0 a {max_amount}.",
+            {"max_amount": MAX_AMOUNT},
+        )
+    return value
+
+
+class StatementIn(BaseModel):
+    amount: Annotated[int, BeforeValidator(check_statement_amount)]
+
+
+class StatementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    card_id: int
+    period: PeriodOut
+    amount: int

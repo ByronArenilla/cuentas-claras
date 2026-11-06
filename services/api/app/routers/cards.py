@@ -1,5 +1,5 @@
 """Tarjetas de un espacio: crear, listar, editar y eliminar (spec 009, RF-1 a
-RF-8).
+RF-8), y el valor real de su extracto en un mes (RF-31 a RF-33).
 
 Eliminar una tarjeta la archiva, como una categoría: `deleted_at` deja de
 ser nula y sus compras, abonos y extractos la conservan (decisión 9).
@@ -18,9 +18,17 @@ from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
-from app.deps import member_space
-from app.models import Card, Space, category_key, utc_now
-from app.schemas import CardDeletedOut, CardIn, CardOut, CardPatch, rate_to_bp
+from app.deps import INVALID_PERIOD, member_space
+from app.models import Card, CardStatement, Space, category_key, utc_now
+from app.schemas import (
+    CardDeletedOut,
+    CardIn,
+    CardOut,
+    CardPatch,
+    StatementIn,
+    StatementOut,
+    rate_to_bp,
+)
 
 router = APIRouter(prefix="/spaces/{space_id}/cards", tags=["cards"])
 
@@ -195,3 +203,75 @@ def first_due_start(card: Card, spent_on: date) -> date:
     decisión 12). Se guarda en la compra (decisión 13)."""
     period = dates.first_due_period(spent_on, card.cutoff_day, card.due_day)
     return dates.period_bounds(period)[0]
+
+
+# --- Valor real del extracto (RF-31 a RF-33) ---
+
+
+def path_period(period: str) -> date:
+    """Día 1 del periodo de la ruta. Un periodo mal escrito responde `422`
+    con el mismo mensaje que el resto de la API (plan 004)."""
+    try:
+        return dates.period_bounds(period)[0]
+    except ValueError:
+        raise INVALID_PERIOD from None
+
+
+def card_statement(db: Session, card: Card, start: date) -> CardStatement | None:
+    return db.scalar(
+        select(CardStatement).where(
+            CardStatement.card_id == card.id,
+            CardStatement.space_id == card.space_id,
+            CardStatement.period_start == start,
+        )
+    )
+
+
+@router.put("/{card_id}/statements/{period}")
+def write_statement(
+    period: str,
+    data: StatementIn,
+    card: Annotated[Card, Depends(space_card)],
+    db: Annotated[Session, Depends(get_db)],
+) -> StatementOut:
+    """Escribe o reemplaza el valor real del extracto de la tarjeta, activa o
+    archivada, en el mes (RF-31, decisión 25). Reemplaza la deuda estimada
+    de ese mes en Deudas (RF-35)."""
+    start = path_period(period)
+    statement = card_statement(db, card, start)
+    if statement is None:
+        statement = CardStatement(
+            space_id=card.space_id, card_id=card.id, period_start=start
+        )
+        db.add(statement)
+    statement.amount = data.amount
+    try:
+        db.commit()
+    except IntegrityError:
+        # Otro `PUT` del mismo mes lo creó entre la lectura y el guardado: se
+        # actualiza ese. Gana el último, como se espera de un `PUT`.
+        db.rollback()
+        statement = card_statement(db, card, start)
+        assert statement is not None
+        statement.amount = data.amount
+        db.commit()
+    return StatementOut.model_validate(statement)
+
+
+@router.delete("/{card_id}/statements/{period}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_statement(
+    period: str,
+    card: Annotated[Card, Depends(space_card)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Quita el valor real del mes, sin pedir confirmación: la deuda vuelve a
+    ser la estimada (RF-32, decisión 20)."""
+    statement = card_statement(db, card, path_period(period))
+    if statement is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"{period} no tiene valor del extracto para esta tarjeta.",
+        )
+    db.delete(statement)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

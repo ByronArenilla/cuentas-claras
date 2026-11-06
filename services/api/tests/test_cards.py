@@ -8,7 +8,7 @@ from httpx import Response
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from app.models import Card
+from app.models import Card, CardStatement
 
 Login = Callable[..., dict[str, str]]
 
@@ -329,3 +329,160 @@ def test_cards_need_a_session(client: TestClient, ana) -> None:
 
     assert client.get(f"/spaces/{space_id}/cards").status_code == 401
     assert client.post(f"/spaces/{space_id}/cards", json=VISA).status_code == 401
+
+
+# --- Valor real del extracto (RF-31 a RF-33) ---
+
+
+@pytest.fixture
+def visa(client: TestClient, ana) -> tuple[dict[str, str], int, dict]:
+    headers, space_id = ana
+    return headers, space_id, create_card(client, headers, space_id).json()
+
+
+def statement_url(space_id: int, card_id: int, period: str = "2026-12") -> str:
+    return f"/spaces/{space_id}/cards/{card_id}/statements/{period}"
+
+
+def statements_in(engine: Engine) -> list[tuple]:
+    with Session(engine) as db:
+        return [
+            (row.card_id, row.period_start.isoformat(), row.amount)
+            for row in db.scalars(select(CardStatement).order_by(CardStatement.id))
+        ]
+
+
+def test_writing_a_statement_returns_it(
+    client: TestClient, engine: Engine, visa
+) -> None:
+    headers, space_id, card = visa
+
+    response = client.put(
+        statement_url(space_id, card["id"]), json={"amount": 431500}, headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "card_id": card["id"],
+        "period": "2026-12",
+        "amount": 431500,
+    }
+    assert statements_in(engine) == [(card["id"], "2026-12-01", 431500)]
+
+
+def test_writing_it_again_replaces_it(client: TestClient, engine: Engine, visa) -> None:
+    headers, space_id, card = visa
+    url = statement_url(space_id, card["id"])
+    client.put(url, json={"amount": 431500}, headers=headers)
+
+    response = client.put(url, json={"amount": 0}, headers=headers)
+
+    assert response.json()["amount"] == 0
+    assert statements_in(engine) == [(card["id"], "2026-12-01", 0)]
+
+
+@pytest.mark.parametrize(
+    "amount", [-1, 1.5, 431500.0, "431500", True, None, 1_000_000_000_001]
+)
+def test_an_invalid_statement_is_rejected(
+    client: TestClient, engine: Engine, visa, amount: object
+) -> None:
+    headers, space_id, card = visa
+
+    response = client.put(
+        statement_url(space_id, card["id"]), json={"amount": amount}, headers=headers
+    )
+
+    assert response.status_code == 422
+    assert statements_in(engine) == []
+
+
+def test_a_statement_of_one_trillion_is_accepted(client: TestClient, visa) -> None:
+    headers, space_id, card = visa
+
+    response = client.put(
+        statement_url(space_id, card["id"]),
+        json={"amount": 1_000_000_000_000},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("period", ["2026-13", "2026-1", "diciembre"])
+def test_a_statement_of_an_invalid_period_is_rejected(
+    client: TestClient, visa, period: str
+) -> None:
+    headers, space_id, card = visa
+
+    response = client.put(
+        statement_url(space_id, card["id"], period), json={"amount": 1}, headers=headers
+    )
+
+    assert response.status_code == 422
+    assert "AAAA-MM" in response.json()["detail"]
+
+
+def test_an_archived_card_takes_statements(client: TestClient, visa) -> None:
+    headers, space_id, card = visa
+    client.delete(f"/spaces/{space_id}/cards/{card['id']}", headers=headers)
+
+    response = client.put(
+        statement_url(space_id, card["id"]), json={"amount": 15000}, headers=headers
+    )
+
+    assert response.status_code == 200
+
+
+def test_removing_a_statement(client: TestClient, engine: Engine, visa) -> None:
+    headers, space_id, card = visa
+    url = statement_url(space_id, card["id"])
+    client.put(url, json={"amount": 431500}, headers=headers)
+
+    response = client.delete(url, headers=headers)
+
+    assert response.status_code == 204
+    assert statements_in(engine) == []
+    again = client.delete(url, headers=headers)
+    assert again.status_code == 404
+    assert again.json()["detail"] == (
+        "2026-12 no tiene valor del extracto para esta tarjeta."
+    )
+
+
+def test_statements_of_a_missing_card_are_not_found(client: TestClient, ana) -> None:
+    headers, space_id = ana
+    url = statement_url(space_id, 999)
+
+    assert client.put(url, json={"amount": 1}, headers=headers).status_code == 404
+    assert client.delete(url, headers=headers).status_code == 404
+
+
+def test_copying_the_plan_does_not_copy_statements(
+    client: TestClient, engine: Engine, visa
+) -> None:
+    # RF-33: cada extracto es de su mes.
+    headers, space_id, card = visa
+    categories = client.get(f"/spaces/{space_id}/categories", headers=headers).json()
+    client.post(
+        f"/spaces/{space_id}/budget-items",
+        json={
+            "period": "2026-11",
+            "name": "Arriendo",
+            "category_id": categories[0]["id"],
+            "amount": 1500000,
+        },
+        headers=headers,
+    )
+    client.put(
+        statement_url(space_id, card["id"], "2026-11"),
+        json={"amount": 431500},
+        headers=headers,
+    )
+
+    copied = client.post(
+        f"/spaces/{space_id}/plan/copy", json={"period": "2026-12"}, headers=headers
+    )
+
+    assert copied.status_code == 201
+    assert statements_in(engine) == [(card["id"], "2026-11-01", 431500)]

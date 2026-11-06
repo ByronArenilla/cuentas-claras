@@ -16,6 +16,7 @@ from app.routers import (
     incomes,
     invitations,
     plan,
+    prepayments,
     spaces,
 )
 
@@ -37,6 +38,7 @@ app.include_router(expenses.router)
 app.include_router(incomes.router)
 app.include_router(invitations.router)
 app.include_router(plan.router)
+app.include_router(prepayments.router)
 app.include_router(spaces.router)
 
 

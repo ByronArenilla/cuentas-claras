@@ -119,7 +119,7 @@ gasto" del plan (salvo la 1, de abonos, que es de T6).
   verde.
 - RF: RF-9 a RF-15, RF-17, RF-18.
 
-## [ ] T5 — Plan de cuotas y valor real del extracto
+## [x] T5 — Plan de cuotas y valor real del extracto
 `app/debts.py` con `purchase_schedule`; `app/routers/prepayments.py` con
 `GET /expenses/{expense_id}/installments`; en `cards.py`, `PUT` y
 `DELETE /cards/{card_id}/statements/{period}`.
