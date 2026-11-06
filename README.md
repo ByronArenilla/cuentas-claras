@@ -70,6 +70,13 @@ ningún dato. Los gastos a crédito que ya tenías quedan sin tarjeta y siguen
 contando el día del gasto. Igual conviene copiar la base antes
 (`budget.db.antes-009`): en SQLite la migración copia la tabla de gastos.
 
+**La spec 010 añade la migración `0005`**, que marca cada compra con tarjeta
+como deuda o gasto del mes. Las que ya tenías quedan como deuda, así que
+ningún resumen cambia. También copia la tabla de gastos en SQLite
+(`budget.db.antes-010`). Mientras corre una migración, la API desactiva las
+claves foráneas de SQLite (así lo pide el modo *batch* cuando otra tabla
+apunta a la que se copia) y al final comprueba que ninguna quedó rota.
+
 **Crear una migración nueva** (al cambiar un modelo), desde `services/api`:
 
 ```sh
@@ -414,10 +421,19 @@ mes desde el que regía, con el nombre de su categoría, y los gastos que ya
 había quedaron como no planeados.
 
 ## Tarjetas y compras a cuotas
-Una compra con tarjeta **no cuenta el día de la compra**: cuenta en los
-meses en que se paga la tarjeta, una cuota por mes, en la sección **Deudas**
-del resumen. También a 1 cuota. Por qué así:
-[ADR 0013](docs/adr/0013-compras-con-tarjeta-cuentan-al-pagar.md).
+Una compra con tarjeta es una de dos cosas:
+
+- **Gasto del mes**: estaba en el plan del mes y la tarjeta es solo la forma
+  de pago (el mercado). Cuenta el día de la compra, en su rubro o su
+  categoría, como un débito.
+- **Deuda**: se compró sin tener la plata. No cuenta el día de la compra:
+  cuenta en los meses en que se paga la tarjeta, una cuota por mes, en la
+  sección **Deudas** del resumen.
+
+A varias cuotas, una compra siempre es deuda. A 1 cuota, tú dices si estaba
+en el plan (`is_debt`); si no lo dices, es gasto del mes. Por qué así:
+[ADR 0013](docs/adr/0013-compras-con-tarjeta-cuentan-al-pagar.md) y
+[ADR 0014](docs/adr/0014-compras-del-mes-con-tarjeta.md).
 
 **Tarjetas.** Una tarjeta tiene nombre, día de corte, día límite de pago y,
 si la conoces, tasa de interés mensual en porcentaje (`1.89` es 1,89 %, con
@@ -440,10 +456,15 @@ Crear de nuevo una tarjeta con el mismo nombre la restaura como era y
 responde `200`.
 
 **Registrar una compra con tarjeta.** Es un gasto a crédito con tarjeta
-(`card_id`), cuotas (de 1 a 48, por defecto 1), **descripción obligatoria**
-y categoría. Nunca lleva rubro. La API calcula el **mes de pago** de la
-primera cuota: la compra entra en el primer corte en su fecha o después, y
-se paga en el primer día límite después de ese corte.
+(`card_id`) y cuotas (de 1 a 48, por defecto 1). La API calcula el **mes de
+pago** de la primera cuota: la compra entra en el primer corte en su fecha o
+después, y se paga en el primer día límite después de ese corte.
+
+- **Deuda**: **descripción obligatoria** y categoría; nunca rubro.
+- **Gasto del mes**: un rubro de su mes o una categoría, como un débito; la
+  descripción es opcional.
+
+Una deuda a 6 cuotas:
 
 ```sh
 curl -X POST localhost:8000/spaces/1/expenses \
@@ -452,8 +473,25 @@ curl -X POST localhost:8000/spaces/1/expenses \
   -d '{"amount": 1200000, "payment_type": "credit", "card_id": 1,
        "installments": 6, "category_id": 1, "description": "Compra TV",
        "spent_on": "2026-11-05"}'
-# {"id": 1, ..., "card_id": 1, "installments": 6, "first_due_period": "2026-12"}
+# {"id": 1, ..., "card_id": 1, "installments": 6, "is_debt": true,
+#  "first_due_period": "2026-12"}
 ```
+
+El mercado de noviembre pagado con la Visa, en el rubro "Mercado" (el 1):
+
+```sh
+curl -X POST localhost:8000/spaces/1/expenses \
+  -H 'Authorization: Bearer <token de Ana>' \
+  -H 'content-type: application/json' \
+  -d '{"amount": 200000, "payment_type": "credit", "card_id": 1,
+       "budget_item_id": 1, "spent_on": "2026-11-03"}'
+# {"id": 2, ..., "category_id": 2, "budget_item_id": 1, "card_id": 1,
+#  "installments": 1, "is_debt": false, "first_due_period": "2026-12"}
+```
+
+Unos zapatos a 1 cuota sin la plata en el plan llevan `"is_debt": true`,
+`category_id` y `description`. Marcar como no deuda una compra a varias
+cuotas se rechaza: "Una compra a varias cuotas siempre es deuda.".
 
 Un gasto a crédito sin tarjeta se rechaza: "Un gasto a crédito necesita la
 tarjeta con la que se pagó.". Los que ya existían antes de la 009 se quedan
@@ -514,7 +552,9 @@ borrar sus abonos.
 
 **Pagar todo.** Paga en un mes el total de la tarjeta: salda con un abono
 cada compra que ya está en el extracto de ese mes. Las compras hechas
-después del corte no están en ese extracto y siguen llegando en su mes.
+después del corte no están en ese extracto y siguen llegando en su mes. Un
+gasto del mes no tiene saldo que saldar. Con el extracto de diciembre en
+581.500, `debt` es la deuda del mes con el abono nuevo:
 
 ```sh
 curl -X POST localhost:8000/spaces/1/cards/1/payoff \
@@ -523,14 +563,24 @@ curl -X POST localhost:8000/spaces/1/cards/1/payoff \
 # {"period": "2026-12",
 #  "prepayments": [{"id": 1, "expense_id": 1, "period": "2026-12",
 #                   "amount": 1000000, "reduces": "term"}],
-#  "debt": 1431500}
+#  "debt": 1381500}
 ```
 
-**Deudas en el resumen.** Cada tarjeta con algo en el mes: sus cuotas,
-sus abonos, lo estimado, el valor real (o `null`) y lo que cuenta
-(`amount`: el valor real o lo estimado, más los abonos). Con la "Compra TV",
-un "Mercado" de 200.000 a 1 cuota, el extracto de 431.500 y el abono de
-400.000:
+**Deudas en el resumen.** Cada tarjeta con algo en el mes trae:
+
+- `installments`: las cuotas de sus deudas;
+- `month_expenses`: los gastos del mes que se pagan con ella ese mes (ya
+  contaron en su mes);
+- `prepayments`: los abonos;
+- `estimated`, y `statement` (el valor real o `null`);
+- `amount`: la **deuda** del mes. Es lo estimado o, con valor real, ese
+  valor menos los gastos del mes (nunca menos de 0); más los abonos;
+- `to_pay`: lo que hay que **pagarle** a la tarjeta. Es el valor real o
+  cuotas más gastos del mes; más los abonos.
+
+Solo la deuda suma en `planned` y `spent`; `total.cards_to_pay` suma lo que
+hay que pagar a todas las tarjetas. Con la "Compra TV", el "Mercado" del
+mes y los "Zapatos" como deuda:
 
 ```sh
 curl 'localhost:8000/spaces/1/summary?period=2026-12' \
@@ -538,15 +588,20 @@ curl 'localhost:8000/spaces/1/summary?period=2026-12' \
 # {...,
 #  "debts": [{"card_id": 1, "name": "Visa", "deleted": false,
 #    "installments": [
-#      {"expense_id": 1, "name": "Compra TV", "number": 1, "count": 4,
+#      {"expense_id": 1, "name": "Compra TV", "number": 1, "count": 6,
 #       "capital": 200000, "interest": 22800, "amount": 222800},
-#      {"expense_id": 2, "name": "Mercado", "number": 1, "count": 1,
-#       "capital": 200000, "interest": 0, "amount": 200000}],
-#    "prepayments": [{"id": 1, "expense_id": 1, "name": "Compra TV",
-#                     "amount": 400000}],
-#    "estimated": 422800, "statement": 431500, "amount": 831500}],
-#  "total": {..., "planned": 831500, "debts": 831500, "spent": 831500, ...}}
+#      {"expense_id": 3, "name": "Zapatos", "number": 1, "count": 1,
+#       "capital": 150000, "interest": 0, "amount": 150000}],
+#    "prepayments": [], "estimated": 372800, "statement": null,
+#    "amount": 372800,
+#    "month_expenses": [{"expense_id": 2, "name": "Mercado", "amount": 200000}],
+#    "to_pay": 572800}],
+#  "total": {..., "planned": 372800, "debts": 372800, "cards_to_pay": 572800,
+#            "spent": 372800, ...}}
 ```
+
+Con el extracto de diciembre en 581.500, la deuda es 381.500 y a pagar
+581.500: los 200.000 del mercado ya contaron en noviembre.
 
 **Estado de la tarjeta.** `GET /spaces/1/cards/1/status` da el saldo
 pendiente, las compras con cuotas del mes actual en adelante y la deuda de

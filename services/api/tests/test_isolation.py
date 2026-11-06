@@ -551,6 +551,7 @@ def test_users_in_different_spaces_cannot_touch_each_others_plan(
             "income": 5_000_000,
             "planned": 800_000,
             "debts": 0,
+            "cards_to_pay": 0,
             "spent_planned": 30_000,
             "spent_unplanned": 0,
             "spent": 30_000,

@@ -16,6 +16,7 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic_core import PydanticCustomError
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -35,6 +36,7 @@ from app.schemas import (
     ExpenseIn,
     ExpenseOut,
     ExpensePatch,
+    debt_flag,
 )
 
 router = APIRouter(prefix="/spaces/{space_id}/expenses", tags=["expenses"])
@@ -163,9 +165,11 @@ def create_expense(
     due_start = None
     if data.card_id is not None:
         card = usable_card(db, space.id, data.card_id)
-        category_id = usable_category(db, space.id, data.category_id).id
         due_start = first_due_start(card, data.spent_on)
-    elif data.budget_item_id is not None:
+    # Un gasto del mes con tarjeta (spec 010) va en un rubro o una categoría
+    # como un débito; una deuda, que `ExpenseIn` ya dejó sin rubro, en su
+    # categoría.
+    if data.budget_item_id is not None:
         item = item_in_space(db, space.id, data.budget_item_id)
         check_same_month(item, data.spent_on)
         category_id = item.category_id
@@ -290,7 +294,12 @@ def payment_changes(db: Session, expense: Expense, changes: dict) -> dict:
             raise DEBIT_WITHOUT_CARD
         extra = item_changes(db, expense, changes)
         if expense.card_id is not None:
-            extra |= {"card_id": None, "installments": None, "first_due_start": None}
+            extra |= {
+                "card_id": None,
+                "installments": None,
+                "first_due_start": None,
+                "is_debt": None,
+            }
         return extra
 
     card_id = changes.get("card_id", expense.card_id)
@@ -301,23 +310,37 @@ def payment_changes(db: Session, expense: Expense, changes: dict) -> dict:
             return item_changes(db, expense, changes)
         raise CARD_REQUIRED
 
-    # 3: queda como compra con tarjeta.
-    item_id = changes.get("budget_item_id", expense.budget_item_id)
-    if item_id is not None:
-        raise NO_ITEM_ON_CARD
-    description = changes.get("description", expense.description)
-    if description is None:
-        raise DESCRIPTION_REQUIRED
+    # 3: queda como compra con tarjeta: deuda o gasto del mes (spec 010).
+    installments = changes.get("installments", expense.installments) or 1
+    sent_flag = changes.get("is_debt")
+    if "is_debt" not in changes and installments == 1:
+        # Sin decirlo, conserva lo que era; un gasto que pasa a tener tarjeta
+        # es gasto del mes, el valor por defecto (decisión 8 de la 010).
+        sent_flag = expense.is_debt if expense.card_id is not None else False
+    try:
+        is_debt = debt_flag(installments, sent_flag)
+    except PydanticCustomError as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, error.message()
+        ) from None
+
     if "card_id" in changes:
         card = usable_card(db, expense.space_id, card_id)
     else:
         card = db.get_one(Card, card_id)
-    if "category_id" in changes:
-        usable_category(db, expense.space_id, changes["category_id"])
 
-    extra: dict = {"installments": changes.get("installments", expense.installments)}
-    if extra["installments"] is None:
-        extra["installments"] = 1
+    extra: dict = {"installments": installments, "is_debt": is_debt}
+    if is_debt:
+        # Deuda: sin rubro, con descripción y categoría (RF-3 de la 010).
+        if changes.get("budget_item_id", expense.budget_item_id) is not None:
+            raise NO_ITEM_ON_CARD
+        if changes.get("description", expense.description) is None:
+            raise DESCRIPTION_REQUIRED
+        if "category_id" in changes:
+            usable_category(db, expense.space_id, changes["category_id"])
+    else:
+        # Gasto del mes: las reglas de rubro o categoría de la 008 (RF-2).
+        extra |= item_changes(db, expense, changes)
     # 5: el mes de pago se recalcula con los días actuales de la tarjeta solo
     # si cambia algo que lo mueve, o si el gasto pasa a ser compra con tarjeta.
     if expense.card_id is None or any(field in changes for field in DUE_FIELDS):

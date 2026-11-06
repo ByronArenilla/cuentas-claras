@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    StrictBool,
     StrictInt,
     field_validator,
     model_validator,
@@ -270,19 +271,21 @@ EXACTLY_ONE_MESSAGE = (
     "Indica el rubro del gasto o, si no estaba planeado, su categoría, pero no los dos."
 )
 
-# Spec 009: un gasto a crédito lleva tarjeta, descripción y categoría, nunca
-# rubro (RF-9, decisiones 2, 8 y 26); uno a débito, ni tarjeta ni cuotas
-# (RF-10).
+# Spec 009: un gasto a crédito lleva tarjeta (RF-9, decisión 8); uno a débito,
+# ni tarjeta ni cuotas (RF-10). Spec 010: una compra con tarjeta es deuda
+# (descripción y categoría, nunca rubro) o gasto del mes (rubro o categoría,
+# como un débito); a varias cuotas siempre es deuda.
 CARD_REQUIRED_MESSAGE = "Un gasto a crédito necesita la tarjeta con la que se pagó."
 NO_ITEM_ON_CARD_MESSAGE = (
-    "Una compra con tarjeta no lleva rubro: cuenta en Deudas el mes en que se "
-    "paga la tarjeta. Indica su categoría."
+    "Una deuda no lleva rubro: cuenta en Deudas el mes en que se paga la "
+    "tarjeta. Indica su categoría."
 )
 DESCRIPTION_REQUIRED_MESSAGE = (
-    "Una compra con tarjeta necesita una descripción: es el nombre con el que "
-    "sus cuotas salen en Deudas."
+    "Una deuda necesita una descripción: es el nombre con el que sus cuotas "
+    "salen en Deudas."
 )
-CATEGORY_REQUIRED_MESSAGE = "Una compra con tarjeta necesita su categoría."
+CATEGORY_REQUIRED_MESSAGE = "Una deuda necesita su categoría."
+INSTALLMENTS_ARE_DEBT_MESSAGE = "Una compra a varias cuotas siempre es deuda."
 DEBIT_WITHOUT_CARD_MESSAGE = "Un gasto a débito no lleva tarjeta ni cuotas."
 MAX_INSTALLMENTS = 48
 
@@ -303,6 +306,31 @@ def check_installments(value: object) -> object:
 Installments = Annotated[int, BeforeValidator(check_installments)]
 
 
+def debt_flag(installments: int, is_debt: bool | None) -> bool:
+    """Si una compra con tarjeta es deuda (spec 010, RF-1): a varias cuotas,
+    siempre; a 1 cuota, lo que se diga y, si no se dice, gasto del mes."""
+    if installments > 1:
+        if is_debt is False:
+            raise PydanticCustomError(
+                "installments_are_debt", INSTALLMENTS_ARE_DEBT_MESSAGE
+            )
+        return True
+    return bool(is_debt)
+
+
+def check_debt(
+    budget_item_id: int | None, description: str | None, category_id: int | None
+) -> None:
+    """Una deuda no lleva rubro y lleva descripción y categoría (RF-3 de la
+    010, RF-9 de la 009)."""
+    if budget_item_id is not None:
+        raise PydanticCustomError("no_item_on_card", NO_ITEM_ON_CARD_MESSAGE)
+    if description is None:
+        raise PydanticCustomError("description_required", DESCRIPTION_REQUIRED_MESSAGE)
+    if category_id is None:
+        raise PydanticCustomError("category_required", CATEGORY_REQUIRED_MESSAGE)
+
+
 class ExpenseIn(BaseModel):
     # Sin `space_id` ni `created_by`: salen de la ruta y de la sesión, y si
     # llegan en el cuerpo se ignoran (RF-14).
@@ -320,27 +348,27 @@ class ExpenseIn(BaseModel):
     # esté activa lo comprueba la ruta (RF-12).
     card_id: StrictInt | None = None
     installments: Installments | None = None
+    # Spec 010: deuda o gasto del mes. A 1 cuota, por defecto gasto del mes
+    # (decisión 8); a varias cuotas, siempre deuda (decisión 1).
+    is_debt: StrictBool | None = None
 
     @model_validator(mode="after")
     def payment_rules(self) -> "ExpenseIn":
         if self.payment_type == "credit":
             if self.card_id is None:
                 raise PydanticCustomError("card_required", CARD_REQUIRED_MESSAGE)
-            if self.budget_item_id is not None:
-                raise PydanticCustomError("no_item_on_card", NO_ITEM_ON_CARD_MESSAGE)
-            if self.description is None:
-                raise PydanticCustomError(
-                    "description_required", DESCRIPTION_REQUIRED_MESSAGE
-                )
-            if self.category_id is None:
-                raise PydanticCustomError(
-                    "category_required", CATEGORY_REQUIRED_MESSAGE
-                )
             if self.installments is None:
                 self.installments = 1
-            return self
+            self.is_debt = debt_flag(self.installments, self.is_debt)
+            if self.is_debt:
+                check_debt(self.budget_item_id, self.description, self.category_id)
+                return self
 
-        if self.card_id is not None or self.installments is not None:
+        elif (
+            self.card_id is not None
+            or self.installments is not None
+            or self.is_debt is not None
+        ):
             raise PydanticCustomError("debit_without_card", DEBIT_WITHOUT_CARD_MESSAGE)
         if (self.budget_item_id is None) == (self.category_id is None):
             raise PydanticCustomError("item_or_category", EXACTLY_ONE_MESSAGE)
@@ -362,6 +390,7 @@ class ExpensePatch(BaseModel):
     # que `null` no vale (RF-15).
     card_id: StrictInt | None = None
     installments: Installments | None = None
+    is_debt: StrictBool | None = None
 
     @field_validator(
         "amount",
@@ -370,6 +399,7 @@ class ExpensePatch(BaseModel):
         "spent_on",
         "card_id",
         "installments",
+        "is_debt",
         mode="before",
     )
     @classmethod
@@ -404,6 +434,8 @@ class ExpenseOut(BaseModel):
     # primera cuota sale como `AAAA-MM`, como los periodos.
     card_id: int | None
     installments: int | None
+    # Spec 010: verdadero si es deuda, falso si es gasto del mes (RF-4).
+    is_debt: bool | None
     first_due_period: Annotated[
         str | None,
         # `month_of` se define más abajo, con los periodos: la lambda lo busca
@@ -597,6 +629,9 @@ class TotalSummaryOut(BaseModel):
     planned: int
     # Deudas de todas las tarjetas en el mes (spec 009, RF-35).
     debts: int
+    # Lo que hay que pagar a todas las tarjetas, aparte: no suma en planeado
+    # ni en gastado (spec 010, RF-9).
+    cards_to_pay: int
     spent_planned: int
     spent_unplanned: int
     # Desde la 009: gastado en rubros más no planeado más las deudas (RF-38).
@@ -626,8 +661,19 @@ class DebtPrepaymentOut(BaseModel):
     amount: int
 
 
+class MonthExpenseOut(BaseModel):
+    """Gasto del mes con tarjeta que se paga en el mes (spec 010, RF-8): ya
+    contó en el mes de la compra."""
+
+    expense_id: int
+    # Descripción, rubro o categoría (RF-10 de la 010).
+    name: str
+    amount: int
+
+
 class CardDebtOut(BaseModel):
-    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36)."""
+    """Deuda de una tarjeta en el mes (spec 009, RF-34 a RF-36) y lo que hay
+    que pagarle (spec 010, RF-8)."""
 
     card_id: int
     name: str
@@ -639,8 +685,12 @@ class CardDebtOut(BaseModel):
     estimated: int
     # Valor real del extracto, o nulo si no se escribió.
     statement: int | None
-    # El valor real o lo estimado, más los abonos del mes.
+    # Deuda del mes: lo estimado o, con valor real, ese valor menos los gastos
+    # del mes; más los abonos (RF-7 de la 010).
     amount: int
+    month_expenses: list[MonthExpenseOut]
+    # Lo que hay que pagarle a la tarjeta en el mes (RF-8 de la 010).
+    to_pay: int
 
 
 class SummaryOut(BaseModel):
@@ -930,6 +980,8 @@ class CardPurchaseStatusOut(BaseModel):
     next_number: int
     # Capital que falta pagar, desde el mes actual.
     balance: int
+    # Spec 010: deuda o gasto del mes todavía sin pagar (RF-11).
+    is_debt: bool
 
 
 class CardMonthOut(BaseModel):
@@ -937,7 +989,12 @@ class CardMonthOut(BaseModel):
     estimated: int
     statement: int | None
     prepayments: int
+    # Deuda del mes (RF-7 de la 010).
     amount: int
+    # Gastos del mes que se pagan este mes y lo que hay que pagar (RF-11 de
+    # la 010).
+    month_expenses: int
+    to_pay: int
 
 
 class CardStatusOut(BaseModel):

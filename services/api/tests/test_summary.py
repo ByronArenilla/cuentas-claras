@@ -229,6 +229,7 @@ def test_the_summary_of_the_month(
         "income": 5_000_000,
         "planned": 2_300_000,
         "debts": 0,
+        "cards_to_pay": 0,
         "spent_planned": 2_312_000,
         "spent_unplanned": 48_000,
         "spent": 2_360_000,
@@ -283,6 +284,7 @@ def test_a_month_without_plan_is_empty_and_creates_nothing(
         "income": 0,
         "planned": 0,
         "debts": 0,
+        "cards_to_pay": 0,
         "spent_planned": 0,
         "spent_unplanned": 0,
         "spent": 0,
@@ -412,6 +414,8 @@ def buy(
         card_id=card.id,
         installments=installments,
         first_due_start=dates.period_bounds(period)[0],
+        # Deuda, como trataba la 009 toda compra con tarjeta (spec 010).
+        is_debt=True,
     )
     session.add(expense)
     session.flush()
@@ -510,6 +514,9 @@ def test_december_debts_of_the_visa(session: Session, space: Space, visa: dict) 
             "estimated": 422_800,
             "statement": None,
             "amount": 422_800,
+            # Spec 010: sin gastos del mes, a pagar es la deuda.
+            "month_expenses": [],
+            "to_pay": 422_800,
         }
     ]
     hogar = next(row for row in summary["categories"] if row["name"] == "Hogar")
@@ -518,6 +525,7 @@ def test_december_debts_of_the_visa(session: Session, space: Space, visa: dict) 
         "income": 5_000_000,
         "planned": 1_922_800,
         "debts": 422_800,
+        "cards_to_pay": 422_800,
         "spent_planned": 1_500_000,
         "spent_unplanned": 0,
         "spent": 1_922_800,
@@ -570,6 +578,7 @@ def test_a_legacy_credit_expense_counts_until_it_gets_a_card(
     legacy.card_id = visa["card"].id
     legacy.installments = 1
     legacy.first_due_start = DECEMBER
+    legacy.is_debt = True
     session.flush()
 
     assert build_summary(session, space.id, "2026-11").total.spent == 0
@@ -678,3 +687,174 @@ def test_the_summary_creates_nothing(
         session.scalar(select(func.count()).select_from(model))
         for model in (Expense, Prepayment, CardStatement)
     ] == counts
+
+
+# --- Gasto del mes con tarjeta (spec 010, RF-6 a RF-10) ---
+
+
+def buy_in_plan(
+    session: Session,
+    user: User,
+    card: Card,
+    amount: int,
+    day: date,
+    *,
+    item: BudgetItem | None = None,
+    category: Category | None = None,
+    description: str | None = None,
+) -> Expense:
+    """Compra con tarjeta a 1 cuota que estaba en el plan: gasto del mes."""
+    period = dates.first_due_period(day, card.cutoff_day, card.due_day)
+    expense = Expense(
+        space_id=card.space_id,
+        category_id=item.category_id if item is not None else category.id,
+        budget_item_id=item.id if item is not None else None,
+        created_by=user.id,
+        amount=amount,
+        payment_type="credit",
+        spent_on=day,
+        description=description,
+        card_id=card.id,
+        installments=1,
+        first_due_start=dates.period_bounds(period)[0],
+        is_debt=False,
+    )
+    session.add(expense)
+    session.flush()
+    return expense
+
+
+@pytest.fixture
+def month_and_debts(session: Session, space: Space, user: User) -> dict:
+    """Criterios de la 010: la Visa, "Salario" de noviembre y diciembre, el
+    rubro "Mercado" de noviembre; el "Mercado" de 200.000 como gasto del mes,
+    la "Compra TV" a 6 cuotas y unos "Zapatos" de 150.000 a 1 cuota como
+    deuda."""
+    hogar = add_category(session, space, "Hogar")
+    comida = add_category(session, space, "Comida")
+    card = add_card(session, space)
+    add_income(session, space, "Salario", 5_000_000)
+    add_income(session, space, "Salario", 5_000_000, DECEMBER)
+    mercado_item = add_item(session, comida, "Mercado", 800_000)
+    mercado = buy_in_plan(
+        session, user, card, 200_000, date(2026, 11, 5), item=mercado_item
+    )
+    tv = buy(session, user, card, hogar, "Compra TV", 1_200_000, date(2026, 11, 12), 6)
+    zapatos = buy(session, user, card, hogar, "Zapatos", 150_000, date(2026, 11, 20))
+    return {
+        "card": card,
+        "comida": comida,
+        "mercado_item": mercado_item,
+        "mercado": mercado,
+        "tv": tv,
+        "zapatos": zapatos,
+    }
+
+
+def test_a_month_expense_on_a_card_counts_in_its_month(
+    session: Session, space: Space, month_and_debts: dict
+) -> None:
+    # Criterio 1, parte del resumen (RF-6).
+    november = build_summary(session, space.id, "2026-11")
+
+    [mercado] = november.budget_items
+    comida = next(row for row in november.categories if row.name == "Comida")
+    assert (mercado.spent, mercado.remaining) == (200_000, 600_000)
+    assert comida.spent == 200_000
+    assert november.debts == []
+    assert november.total.spent == 200_000
+
+
+def test_december_separates_month_expenses_from_debts(
+    session: Session, space: Space, month_and_debts: dict
+) -> None:
+    # Criterio 2 (RF-7 a RF-9).
+    december = build_summary(session, space.id, "2026-12").model_dump()
+
+    [visa] = december["debts"]
+    assert [
+        (row["name"], row["number"], row["count"], row["amount"])
+        for row in visa["installments"]
+    ] == [
+        ("Compra TV", 1, 6, 222_800),
+        ("Zapatos", 1, 1, 150_000),
+    ]
+    assert visa["month_expenses"] == [
+        {
+            "expense_id": month_and_debts["mercado"].id,
+            "name": "Mercado",
+            "amount": 200_000,
+        }
+    ]
+    assert (visa["estimated"], visa["statement"], visa["amount"], visa["to_pay"]) == (
+        372_800,
+        None,
+        372_800,
+        572_800,
+    )
+    comida = next(row for row in december["categories"] if row["name"] == "Comida")
+    assert comida["spent"] == 0
+    assert december["total"] == {
+        "income": 5_000_000,
+        "planned": 372_800,
+        "debts": 372_800,
+        "cards_to_pay": 572_800,
+        "spent_planned": 0,
+        "spent_unplanned": 0,
+        "spent": 372_800,
+        "unassigned": 4_627_200,
+        "balance": 4_627_200,
+    }
+
+
+def test_the_statement_is_the_total_to_pay(
+    session: Session, space: Space, user: User, month_and_debts: dict
+) -> None:
+    # Criterio 3 (RF-7, RF-8, decisiones 4 y 10).
+    card = month_and_debts["card"]
+    write_statement(session, card, 581_500, DECEMBER)
+    [visa] = build_summary(session, space.id, "2026-12").debts
+    assert (visa.amount, visa.to_pay) == (381_500, 581_500)
+
+    prepayment = prepay(session, user, month_and_debts["tv"], 400_000, DECEMBER)
+    [visa] = build_summary(session, space.id, "2026-12").debts
+    assert (visa.amount, visa.to_pay) == (781_500, 981_500)
+
+    session.delete(prepayment)
+    session.execute(delete(CardStatement))
+    write_statement(session, card, 150_000, DECEMBER)
+    december = build_summary(session, space.id, "2026-12")
+    [visa] = december.debts
+    assert (visa.amount, visa.to_pay) == (0, 150_000)
+    assert december.total.debts == 0
+
+
+def test_the_name_of_a_month_expense(
+    session: Session, space: Space, user: User, month_and_debts: dict
+) -> None:
+    # RF-10: descripción, o rubro, o categoría.
+    card = month_and_debts["card"]
+    described = buy_in_plan(
+        session,
+        user,
+        card,
+        30_000,
+        date(2026, 11, 6),
+        item=month_and_debts["mercado_item"],
+        description="Éxito",
+    )
+    by_category = buy_in_plan(
+        session,
+        user,
+        card,
+        40_000,
+        date(2026, 11, 7),
+        category=month_and_debts["comida"],
+    )
+
+    [visa] = build_summary(session, space.id, "2026-12").debts
+    names = {row.expense_id: row.name for row in visa.month_expenses}
+
+    assert names[month_and_debts["mercado"].id] == "Mercado"
+    assert names[described.id] == "Éxito"
+    assert names[by_category.id] == "Comida"

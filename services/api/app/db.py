@@ -12,7 +12,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, create_engine, event, make_url
+from sqlalchemy import Connection, Engine, create_engine, event, make_url
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry, StaticPool
@@ -75,6 +75,29 @@ def pending_revisions(engine: Engine, config: Config) -> list[str]:
     return [revision.revision for revision in reversed(list(newest_first))]
 
 
+def set_sqlite_foreign_keys(connection: Connection, *, enabled: bool) -> None:
+    """Activa o desactiva las claves foráneas de SQLite en esta conexión.
+
+    En modo *batch*, SQLite copia una tabla, borra la vieja y renombra la
+    nueva. Si otra tabla apunta a la vieja (como `prepayments` a `expenses`
+    desde la 0004), el borrado rompería la clave foránea aunque la copia
+    tenga las mismas filas. Alembic recomienda desactivarlas mientras corre
+    la migración ([batch](https://alembic.sqlalchemy.org/en/latest/batch.html)).
+    El `PRAGMA` no hace nada dentro de una transacción, así que se aplica y se
+    confirma antes de abrirla.
+    """
+    connection.exec_driver_sql(f"PRAGMA foreign_keys={'ON' if enabled else 'OFF'}")
+    connection.commit()
+
+
+def check_sqlite_foreign_keys(connection: Connection) -> None:
+    """Falla si la migración dejó alguna clave foránea rota: con las claves
+    desactivadas, SQLite no lo habría impedido."""
+    broken = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
+    if broken:
+        raise RuntimeError(f"La migración dejó claves foráneas rotas: {broken}")
+
+
 def run_migrations(engine: Engine) -> None:
     """Aplica las migraciones pendientes (RF-31). Sin pendientes, no hace nada
     (RF-37).
@@ -87,11 +110,21 @@ def run_migrations(engine: Engine) -> None:
     config = alembic_config()
     for revision in pending_revisions(engine, config):
         try:
-            with engine.begin() as connection:
-                # Receta de Alembic para compartir la conexión: env.py la usa
-                # en lugar de crear otra (app/migrations/env.py).
-                config.attributes["connection"] = connection
-                command.upgrade(config, revision)
+            with engine.connect() as connection:
+                sqlite = connection.dialect.name == "sqlite"
+                if sqlite:
+                    set_sqlite_foreign_keys(connection, enabled=False)
+                try:
+                    with connection.begin():
+                        # Receta de Alembic para compartir la conexión: env.py
+                        # la usa en lugar de crear otra (app/migrations/env.py).
+                        config.attributes["connection"] = connection
+                        command.upgrade(config, revision)
+                        if sqlite:
+                            check_sqlite_foreign_keys(connection)
+                finally:
+                    if sqlite:
+                        set_sqlite_foreign_keys(connection, enabled=True)
         except Exception as error:
             raise MigrationError(
                 f"Falló la migración {revision}: {error}. La API no arranca. "

@@ -21,7 +21,7 @@ from app.installments import (
     build_schedule,
     prepayment_limit,
 )
-from app.models import Card, CardStatement, Expense, Prepayment
+from app.models import BudgetItem, Card, CardStatement, Category, Expense, Prepayment
 from app.schemas import (
     CardDebtOut,
     CardMonthOut,
@@ -30,6 +30,7 @@ from app.schemas import (
     CardStatusOut,
     DebtInstallmentOut,
     DebtPrepaymentOut,
+    MonthExpenseOut,
 )
 
 
@@ -85,29 +86,64 @@ WINDOW_MONTHS = 47
 
 @dataclass(frozen=True)
 class CardMonth:
-    """Lo que una tarjeta cobra en un mes: las cuotas de sus compras, los
-    abonos, y el valor real del extracto si se escribió."""
+    """Lo que una tarjeta cobra en un mes: las cuotas de sus deudas, los gastos
+    del mes que se pagan con ella (spec 010), los abonos y el valor real del
+    extracto si se escribió."""
 
     card: Card
-    # Cada cuota del mes con su compra, en orden de compra.
+    # Cada cuota de una deuda que cae en el mes, con su compra, en orden de
+    # compra.
     installments: list[tuple[Expense, Installment]]
+    # Gastos del mes con la tarjeta que se pagan este mes: ya contaron en el
+    # mes de la compra y no son deuda (RF-6 y RF-8 de la 010).
+    month_expenses: list[tuple[Expense, Installment]]
     prepayments: list[tuple[Expense, Prepayment]]
     statement: int | None
 
     @property
     def estimated(self) -> int:
-        """Suma del capital y el interés de las cuotas del mes (RF-34)."""
+        """Suma del capital y el interés de las cuotas de deudas (RF-7 de la
+        010)."""
         return sum(row.amount for _, row in self.installments)
 
     @property
+    def month_total(self) -> int:
+        return sum(row.amount for _, row in self.month_expenses)
+
+    @property
+    def prepaid(self) -> int:
+        return sum(prepayment.amount for _, prepayment in self.prepayments)
+
+    @property
     def amount(self) -> int:
-        """El valor real o, si no hay, lo estimado; más los abonos (RF-35)."""
-        base = self.estimated if self.statement is None else self.statement
-        return base + sum(prepayment.amount for _, prepayment in self.prepayments)
+        """Deuda del mes: lo estimado o, con valor real, ese valor menos los
+        gastos del mes y nunca menos de 0; más los abonos (RF-7 de la 010,
+        decisiones 4 y 10)."""
+        if self.statement is None:
+            base = self.estimated
+        else:
+            base = max(self.statement - self.month_total, 0)
+        return base + self.prepaid
+
+    @property
+    def to_pay(self) -> int:
+        """Lo que hay que pagarle a la tarjeta en el mes: el valor real o las
+        cuotas de deudas más los gastos del mes; más los abonos (RF-8 de la
+        010)."""
+        if self.statement is None:
+            base = self.estimated + self.month_total
+        else:
+            base = self.statement
+        return base + self.prepaid
 
     @property
     def is_empty(self) -> bool:
-        return not self.installments and not self.prepayments and self.statement is None
+        return (
+            not self.installments
+            and not self.month_expenses
+            and not self.prepayments
+            and self.statement is None
+        )
 
 
 def window_purchases(
@@ -165,12 +201,14 @@ def card_month(db: Session, card: Card, period: str) -> CardMonth:
     purchases = window_purchases(db, card, period, period)
     prepayments = prepayments_by_purchase(db, purchases)
     installments = []
+    month_expenses = []
     month_prepayments = []
     for purchase in purchases:
         own = prepayments[purchase.id]
         for row in schedule_of(purchase, card.monthly_rate_bp, own):
             if row.period == period:
-                installments.append((purchase, row))
+                target = installments if purchase.is_debt else month_expenses
+                target.append((purchase, row))
         month_prepayments += [
             (purchase, prepayment)
             for prepayment in own
@@ -179,6 +217,7 @@ def card_month(db: Session, card: Card, period: str) -> CardMonth:
     return CardMonth(
         card=card,
         installments=installments,
+        month_expenses=month_expenses,
         prepayments=month_prepayments,
         statement=statement_amount(db, card, period),
     )
@@ -282,12 +321,32 @@ def card_debts(db: Session, space_id: int, period: str) -> list[CardDebtOut]:
                     )
                     for purchase, prepayment in month.prepayments
                 ],
+                month_expenses=[
+                    MonthExpenseOut(
+                        expense_id=purchase.id,
+                        name=purchase_name(db, purchase),
+                        amount=row.amount,
+                    )
+                    for purchase, row in month.month_expenses
+                ],
                 estimated=month.estimated,
                 statement=month.statement,
                 amount=month.amount,
+                to_pay=month.to_pay,
             )
         )
     return debts
+
+
+def purchase_name(db: Session, expense: Expense) -> str:
+    """Nombre de una compra con tarjeta: su descripción, o el nombre de su
+    rubro, o el de su categoría (RF-10 de la 010). Una deuda siempre tiene
+    descripción; un gasto del mes, no siempre."""
+    if expense.description:
+        return expense.description
+    if expense.budget_item_id is not None:
+        return db.get_one(BudgetItem, expense.budget_item_id).name
+    return db.get_one(Category, expense.category_id).name
 
 
 # --- Estado de la tarjeta (RF-40) ---
@@ -346,12 +405,13 @@ def card_status(db: Session, card: Card, current: str) -> CardStatusOut:
         pending_purchases.append(
             CardPurchaseStatusOut(
                 expense_id=purchase.id,
-                name=purchase.description or "",
+                name=purchase_name(db, purchase),
                 amount=purchase.amount,
                 spent_on=purchase.spent_on,
                 count=pending[0].count,
                 next_number=pending[0].number,
                 balance=sum(row.capital for row in pending),
+                is_debt=bool(purchase.is_debt),
             )
         )
 
@@ -369,8 +429,10 @@ def card_status(db: Session, card: Card, current: str) -> CardStatusOut:
                     period=period,
                     estimated=month.estimated,
                     statement=month.statement,
-                    prepayments=sum(row.amount for _, row in month.prepayments),
+                    prepayments=month.prepaid,
                     amount=month.amount,
+                    month_expenses=month.month_total,
+                    to_pay=month.to_pay,
                 )
             )
             period = dates.shift_period(period, 1)

@@ -13,11 +13,18 @@ from alembic.migration import MigrationContext
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from app.db import MigrationError, build_engine, run_migrations
+from app.db import (
+    MigrationError,
+    alembic_config,
+    build_engine,
+    check_sqlite_foreign_keys,
+    run_migrations,
+    set_sqlite_foreign_keys,
+)
 from app.models import Base
 from tests import old_schemas
 
-HEAD = "0004"
+HEAD = "0005"
 
 
 @pytest.fixture
@@ -347,8 +354,9 @@ def test_the_expenses_table_checks_the_shape_of_a_card_purchase(
     insert = (
         "INSERT INTO expenses (space_id, category_id, created_by, amount,"
         " payment_type, spent_on, created_at, card_id, installments,"
-        " first_due_start) VALUES (1, 1, 1, 20000, '{payment_type}', '2026-11-12',"
-        " '2026-11-12 10:00:00', 1, {installments}, '2026-12-01')"
+        " first_due_start, is_debt) VALUES (1, 1, 1, 20000, '{payment_type}',"
+        " '2026-11-12', '2026-11-12 10:00:00', 1, {installments}, '2026-12-01',"
+        " true)"
     )
 
     for payment_type, installments in (("debit", 1), ("credit", 49)):
@@ -359,3 +367,100 @@ def test_the_expenses_table_checks_the_shape_of_a_card_purchase(
             )
     execute(file_engine, [insert.format(payment_type="credit", installments=6)])
     assert rows(file_engine, "SELECT COUNT(*) FROM expenses") == [(2,)]
+
+
+# --- Gasto del mes o deuda (spec 010, RF-12) ---
+
+
+def migrate_to(engine: Engine, revision: str) -> None:
+    """Lleva la base hasta `revision`, no hasta `head`: así se pueden poner
+    filas con el esquema de una spec anterior antes de la migración nueva."""
+    config = alembic_config()
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, revision)
+
+
+def test_existing_card_purchases_become_debts(file_engine: Engine) -> None:
+    # Criterio 7 de la 010: como las trataba la 009, todas quedan como deuda.
+    execute(file_engine, old_schemas.SCHEMA_007 + old_schemas.BASE_ROWS)
+    migrate_to(file_engine, "0004")
+    purchase = (
+        "INSERT INTO expenses (id, space_id, category_id, created_by, amount,"
+        " payment_type, spent_on, created_at, card_id, installments,"
+        " first_due_start) VALUES ({id}, 1, 1, 1, {amount}, 'credit',"
+        " '2026-11-12', '2026-11-12 10:00:00', 1, {installments}, '2026-12-01')"
+    )
+    execute(
+        file_engine,
+        [
+            "INSERT INTO cards (id, space_id, name, name_key, cutoff_day, due_day,"
+            " created_at) VALUES (1, 1, 'Visa', 'visa', 25, 10,"
+            " '2026-11-01 10:00:00')",
+            purchase.format(id=2, amount=200000, installments=1),
+            purchase.format(id=3, amount=1200000, installments=6),
+        ],
+    )
+    columns = preserved_columns(file_engine)
+    before = snapshot(file_engine, columns)
+
+    run_migrations(file_engine)
+
+    assert version(file_engine) == HEAD
+    assert snapshot(file_engine, columns) == before
+    assert rows(file_engine, "SELECT id, is_debt FROM expenses ORDER BY id") == [
+        (1, None),
+        (2, 1),
+        (3, 1),
+    ]
+    assert schema_diff(file_engine) == []
+
+
+def test_copying_expenses_keeps_the_prepayments_pointing_to_them(
+    file_engine: Engine,
+) -> None:
+    # En SQLite, la 0005 copia `expenses` para cambiar su CHECK. Desde la
+    # 0004, `prepayments` apunta a `expenses`: con abonos guardados, borrar la
+    # tabla vieja no puede romper esa clave foránea ni perder los abonos.
+    execute(file_engine, old_schemas.SCHEMA_007 + old_schemas.BASE_ROWS)
+    migrate_to(file_engine, "0004")
+    execute(
+        file_engine,
+        [
+            "INSERT INTO cards (id, space_id, name, name_key, cutoff_day, due_day,"
+            " created_at) VALUES (1, 1, 'Visa', 'visa', 25, 10,"
+            " '2026-11-01 10:00:00')",
+            "INSERT INTO expenses (id, space_id, category_id, created_by, amount,"
+            " payment_type, spent_on, created_at, card_id, installments,"
+            " first_due_start) VALUES (2, 1, 1, 1, 1200000, 'credit', '2026-11-12',"
+            " '2026-11-12 10:00:00', 1, 6, '2026-12-01')",
+            "INSERT INTO prepayments (id, space_id, expense_id, period_start, amount,"
+            " reduces, created_by, created_at) VALUES (1, 1, 2, '2026-12-01',"
+            " 400000, 'term', 1, '2026-12-01 10:00:00')",
+        ],
+    )
+
+    run_migrations(file_engine)
+
+    assert version(file_engine) == HEAD
+    assert rows(file_engine, "SELECT id, expense_id, amount FROM prepayments") == [
+        (1, 2, 400000)
+    ]
+    # La clave foránea sigue activa después de migrar.
+    with pytest.raises(IntegrityError):
+        execute(file_engine, ["DELETE FROM expenses WHERE id = 2"])
+
+
+def test_a_migration_that_breaks_a_foreign_key_fails(file_engine: Engine) -> None:
+    # Con las claves desactivadas durante la migración, SQLite no frena una
+    # fila huérfana: la comprobación del final sí.
+    execute(file_engine, old_schemas.SCHEMA_007 + old_schemas.BASE_ROWS)
+    with file_engine.connect() as connection:
+        set_sqlite_foreign_keys(connection, enabled=False)
+        connection.exec_driver_sql("DELETE FROM users WHERE id = 1")
+        connection.commit()
+
+        with pytest.raises(RuntimeError, match="claves foráneas rotas"):
+            check_sqlite_foreign_keys(connection)
+
+        set_sqlite_foreign_keys(connection, enabled=True)

@@ -104,6 +104,7 @@ def test_the_summary_of_october_end_to_end(ana: Space) -> None:
         "income": 5_000_000,
         "planned": 800_000,
         "debts": 0,
+        "cards_to_pay": 0,
         "spent_planned": 812_000,
         "spent_unplanned": 38_000,
         "spent": 850_000,

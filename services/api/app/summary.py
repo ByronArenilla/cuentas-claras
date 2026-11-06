@@ -1,9 +1,9 @@
 """Resumen del plan de un mes (spec 008, RF-23 a RF-25; reemplaza al de la 004),
 con las deudas de las tarjetas (spec 009, RF-36 a RF-39).
 
-Las compras con tarjeta no cuentan en su rubro ni en su categoría: cuentan
-como Deudas en los meses en que se pagan sus cuotas (decisiones 1 y 6 de la
-009).
+Las deudas con tarjeta no cuentan en su categoría: cuentan como Deudas en
+los meses en que se pagan sus cuotas (decisiones 1 y 6 de la 009). Un gasto
+del mes con tarjeta cuenta en su mes, como un débito (spec 010).
 
 Funciones sin nada de HTTP, que se prueban con una sesión de base de datos
 (principio 10). Todas las consultas filtran por `space_id` (RF-29).
@@ -11,7 +11,7 @@ Funciones sin nada de HTTP, que se prueban con una sesión de base de datos
 
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import dates
@@ -32,15 +32,17 @@ def spent_by_category(
     """Suma de los gastos de cada categoría con `start <= spent_on < end`,
     planeados o no, con la regla de periodo de la 003 (RF-9 de la 003).
 
-    Las categorías sin gastos no aparecen. Las compras con tarjeta no cuentan:
-    van a Deudas (RF-37 de la 009). Un gasto a crédito sin tarjeta, de antes
-    de la 009, sí cuenta el día del gasto.
+    Las categorías sin gastos no aparecen. Las deudas con tarjeta no cuentan:
+    van a Deudas (RF-37 de la 009). Sí cuentan el día del gasto los gastos del
+    mes con tarjeta (RF-6 de la 010) y los gastos a crédito sin tarjeta de
+    antes de la 009.
     """
     rows = db.execute(
         select(Expense.category_id, func.sum(Expense.amount))
         .where(
             Expense.space_id == space_id,
-            Expense.card_id.is_(None),
+            # Gastos sin tarjeta y gastos del mes con tarjeta (RF-6 de la 010).
+            or_(Expense.card_id.is_(None), Expense.is_debt.is_(False)),
             Expense.spent_on >= start,
             Expense.spent_on < end,
         )
@@ -149,6 +151,7 @@ def build_summary(db: Session, space_id: int, period: str) -> SummaryOut:
             income=income,
             planned=planned,
             debts=debt_total,
+            cards_to_pay=sum(row.to_pay for row in debts),
             spent_planned=spent_planned,
             spent_unplanned=spent_own_day - spent_planned,
             spent=spent,

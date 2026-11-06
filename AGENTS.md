@@ -36,17 +36,23 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
 - **Tarjeta** (`card`): tarjeta de crédito del espacio, con día de corte, día
   límite de pago y tasa mensual opcional. Eliminarla la archiva, y crearla
   de nuevo la restaura.
-- **Compra con tarjeta**: gasto a crédito con tarjeta, cuotas, descripción
-  obligatoria y categoría, sin rubro. Cuenta en Deudas en los meses en que
-  se pagan sus cuotas, no el día de la compra.
+- **Compra con tarjeta**: gasto a crédito con tarjeta y cuotas. Es deuda o
+  gasto del mes (`is_debt`).
+- **Gasto del mes con tarjeta**: compra a 1 cuota que estaba en el plan del
+  mes. Cuenta el mes de la compra, en su rubro o su categoría, como un
+  débito.
 - **Cuota** (`installment`): la parte de una compra que se paga en un mes,
   con capital fijo e interés estimado sobre el saldo.
 - **Abono** (`prepayment`): pago extra a una compra en un mes, que baja la
   cuota o el plazo. "Pagar todo" salda con abonos las compras del extracto.
 - **Valor del extracto** (`card_statement`): lo que de verdad cobra una
   tarjeta en un mes; reemplaza la estimación.
-- **Deuda** (`debt`): lo que cobra una tarjeta en un mes: el valor del
-  extracto o lo estimado, más los abonos.
+- **Deuda** (`debt`): compra a varias cuotas, o a 1 cuota que no estaba en
+  el plan; lleva descripción y categoría, sin rubro. Sus cuotas llegan a
+  Deudas en los meses de pago. La deuda del mes de una tarjeta es lo
+  estimado, o el extracto menos los gastos del mes, más los abonos.
+- **A pagar**: lo que se le paga a una tarjeta en un mes: los gastos del
+  mes más la deuda.
 - **Categoría** (`category`): agrupa rubros y gastos (hogar, transporte,
   comida...). Eliminarla la archiva: lo que ya la tenía la conserva, y
   crearla de nuevo la restaura.
@@ -59,8 +65,8 @@ Actions, AWS, Terraform, Ansible, Prometheus, Grafana, Kubernetes).
 - **Periodo** (`period`): un mes calendario en la zona horaria configurada,
   con formato `YYYY-MM`.
 - **Resumen** (`summary`): ingresos, planeado vs. gastado por rubro y por
-  categoría, deudas de las tarjetas, sin asignar y balance de un periodo,
-  dentro de un espacio.
+  categoría, deudas de las tarjetas y lo que hay que pagarles, sin asignar y
+  balance de un periodo, dentro de un espacio.
 
 Las reglas concretas de cada concepto están en las specs. Si una regla no
 está escrita, pregunta en lugar de suponer.
