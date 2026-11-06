@@ -26,7 +26,7 @@
 - Hecho cuando: los tests pasan y los de la 001 siguen en verde.
 - RF: RF-5.
 
-## [ ] T2 — CORS para la web (API)
+## [x] T2 — CORS para la web (API)
 `CORSMiddleware` en `main.py` con el origen `WEB_BASE_URL`.
 
 - Test primero (`test_cors.py`):

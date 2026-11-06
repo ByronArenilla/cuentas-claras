@@ -2,10 +2,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Importar la configuración aquí hace que el servicio falle al arrancar, y no
 # en la primera petición, si falta una variable obligatoria (RF-33).
-from app.config import settings  # noqa: F401
+from app.config import settings
 from app.db import engine, run_migrations
 from app.routers import (
     auth,
@@ -30,6 +31,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="gastito API", lifespan=lifespan)
+
+# La web corre en otro origen (otro puerto en local) y el navegador solo le
+# deja leer las respuestas si la API lo permite (spec 011, RF-38). Solo el
+# origen de la web: es la misma URL de los enlaces de invitación. Sin
+# credenciales, porque el token viaja en `Authorization` y no en una cookie.
+# https://developer.mozilla.org/es/docs/Web/HTTP/CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.web_base_url],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 app.include_router(auth.router)
 app.include_router(budget_items.router)
 app.include_router(cards.router)
