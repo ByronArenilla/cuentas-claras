@@ -855,3 +855,16 @@ class PrepaymentCreatedOut(BaseModel):
 def format_pesos(amount: int) -> str:
     """Monto con punto de miles, como se escribe en Colombia: 1.000.000."""
     return f"{amount:,}".replace(",", ".")
+
+
+class PayoffIn(BaseModel):
+    # Mes en que se paga todo; por defecto el actual (RF-29).
+    period: Period = Field(default_factory=current_period)
+
+
+class PayoffOut(BaseModel):
+    period: str
+    # Un abono por cada compra saldada.
+    prepayments: list[PrepaymentOut]
+    # La deuda de la tarjeta en ese mes, con los abonos nuevos (RF-35).
+    debt: int

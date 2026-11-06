@@ -1,5 +1,6 @@
 """Tarjetas de un espacio: crear, listar, editar y eliminar (spec 009, RF-1 a
-RF-8), y el valor real de su extracto en un mes (RF-31 a RF-33).
+RF-8), el valor real de su extracto en un mes (RF-31 a RF-33) y pagar
+todo (RF-29, RF-30).
 
 Eliminar una tarjeta la archiva, como una categoría: `deleted_at` deja de
 ser nula y sus compras, abonos y extractos la conservan (decisión 9).
@@ -18,13 +19,17 @@ from sqlalchemy.orm import Session
 
 from app import dates
 from app.db import get_db
-from app.deps import INVALID_PERIOD, member_space
-from app.models import Card, CardStatement, Space, category_key, utc_now
+from app.debts import LaterPrepayment, NothingToPayOff, card_month, pay_off
+from app.deps import INVALID_PERIOD, current_user, member_space
+from app.models import Card, CardStatement, Space, User, category_key, utc_now
 from app.schemas import (
     CardDeletedOut,
     CardIn,
     CardOut,
     CardPatch,
+    PayoffIn,
+    PayoffOut,
+    PrepaymentOut,
     StatementIn,
     StatementOut,
     rate_to_bp,
@@ -275,3 +280,39 @@ def delete_statement(
     db.delete(statement)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Pagar todo (RF-29, RF-30) ---
+
+
+@router.post("/{card_id}/payoff", status_code=status.HTTP_201_CREATED)
+def pay_off_card(
+    data: PayoffIn,
+    card: Annotated[Card, Depends(space_card)],
+    user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> PayoffOut:
+    """Paga el total de la tarjeta, activa o archivada, en el mes: salda con
+    un abono cada compra que ya está en el extracto (RF-29, decisión 28). Las
+    compras posteriores al corte siguen llegando en su mes (RF-30)."""
+    try:
+        created = pay_off(db, card, data.period, user.id)
+    except NothingToPayOff:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"La tarjeta «{card.name}» no tiene compras con saldo después de la "
+            f"cuota de {data.period}; no se creó ningún abono.",
+        ) from None
+    except LaterPrepayment as conflict:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"«{conflict.purchase.description}» ya tiene un abono en "
+            f"{conflict.period}. Bórralo para pagar todo en {data.period}; no se "
+            "creó ningún abono.",
+        ) from None
+    db.commit()
+    return PayoffOut(
+        period=data.period,
+        prepayments=[PrepaymentOut.model_validate(row) for row in created],
+        debt=card_month(db, card, data.period).amount,
+    )

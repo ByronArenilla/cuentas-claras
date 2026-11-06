@@ -1,6 +1,7 @@
 """Rutas de tarjetas (spec 009, RF-1 a RF-8)."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,9 +9,13 @@ from httpx import Response
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
+from app import dates
 from app.models import Card, CardStatement
 
 Login = Callable[..., dict[str, str]]
+
+# 1 de diciembre de 2026 a mediodía en Bogotá.
+DECEMBER_1 = datetime(2026, 12, 1, 17, 0, tzinfo=UTC)
 
 VISA = {"name": "Visa", "cutoff_day": 25, "due_day": 10, "monthly_rate": 1.9}
 
@@ -486,3 +491,151 @@ def test_copying_the_plan_does_not_copy_statements(
 
     assert copied.status_code == 201
     assert statements_in(engine) == [(card["id"], "2026-11-01", 431500)]
+
+
+# --- Pagar todo (RF-29, RF-30) ---
+
+
+class Payoff:
+    """Visa (corte 25, pago 10, 1,90 %) con la "Compra TV" (12 de noviembre,
+    6 cuotas), el "Mercado" (5 de noviembre, 1 cuota) y unos "Zapatos" (30 de
+    noviembre, 1 cuota, después del corte)."""
+
+    def __init__(self, client: TestClient, headers: dict[str, str]) -> None:
+        self.client, self.headers = client, headers
+        self.space_id = personal_space(client, headers)
+        self.base = f"/spaces/{self.space_id}"
+        self.card = create_card(client, headers, self.space_id).json()
+        self.tv = self.purchase("Compra TV", 1200000, "2026-11-12", 6)
+        self.mercado = self.purchase("Mercado", 200000, "2026-11-05", 1)
+        self.zapatos = self.purchase("Zapatos", 150000, "2026-11-30", 1)
+
+    def purchase(self, description: str, amount: int, day: str, count: int) -> dict:
+        categories = self.client.get(
+            f"{self.base}/categories", headers=self.headers
+        ).json()
+        body = {
+            "payment_type": "credit",
+            "card_id": self.card["id"],
+            "category_id": categories[0]["id"],
+            "description": description,
+            "amount": amount,
+            "spent_on": day,
+            "installments": count,
+        }
+        response = self.client.post(
+            f"{self.base}/expenses", json=body, headers=self.headers
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def pay_off(self, card_id: int | None = None, **body: object) -> Response:
+        return self.client.post(
+            f"{self.base}/cards/{card_id or self.card['id']}/payoff",
+            json=body,
+            headers=self.headers,
+        )
+
+    def schedule(self, expense: dict) -> dict:
+        return self.client.get(
+            f"{self.base}/expenses/{expense['id']}/installments", headers=self.headers
+        ).json()
+
+
+@pytest.fixture
+def payoff(client: TestClient, login: Login, monkeypatch: pytest.MonkeyPatch) -> Payoff:
+    monkeypatch.setattr(dates, "now", lambda: DECEMBER_1)
+    return Payoff(client, login("ana@example.com"))
+
+
+def test_paying_off_settles_the_purchases_in_the_statement(payoff: Payoff) -> None:
+    # Criterio 13, parte de abonos (decisión 28).
+    response = payoff.pay_off(period="2026-12")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["period"] == "2026-12"
+    [prepayment] = body["prepayments"]
+    assert prepayment == {
+        "id": prepayment["id"],
+        "expense_id": payoff.tv["id"],
+        "period": "2026-12",
+        "amount": 1000000,
+        "reduces": "term",
+    }
+    # Cuotas de diciembre (422.800) más el saldo de la TV.
+    assert body["debt"] == 1422800
+    assert [row["period"] for row in payoff.schedule(payoff.tv)["installments"]] == [
+        "2026-12"
+    ]
+    assert payoff.schedule(payoff.mercado)["prepayments"] == []
+    # Los zapatos son de después del corte: llegan en enero, sin abono.
+    zapatos = payoff.schedule(payoff.zapatos)
+    assert zapatos["prepayments"] == []
+    assert zapatos["installments"][0]["period"] == "2027-01"
+
+
+def test_paying_off_twice_has_nothing_to_settle(payoff: Payoff) -> None:
+    payoff.pay_off(period="2026-12")
+
+    response = payoff.pay_off(period="2026-12")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "La tarjeta «Visa» no tiene compras con saldo después de la cuota de "
+        "2026-12; no se creó ningún abono."
+    )
+
+
+def test_paying_off_with_a_later_prepayment_creates_nothing(payoff: Payoff) -> None:
+    celular = payoff.purchase("Celular", 600000, "2026-11-20", 3)
+    payoff.client.post(
+        f"{payoff.base}/expenses/{payoff.tv['id']}/prepayments",
+        json={"amount": 100000, "period": "2027-02", "reduces": "term"},
+        headers=payoff.headers,
+    )
+
+    response = payoff.pay_off(period="2027-01")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "«Compra TV» ya tiene un abono en 2027-02. Bórralo para pagar todo en "
+        "2027-01; no se creó ningún abono."
+    )
+    # Todo o nada: el celular, que sí se podía saldar, queda sin abono.
+    assert payoff.schedule(celular)["prepayments"] == []
+
+
+def test_paying_off_without_period_uses_the_current_month(payoff: Payoff) -> None:
+    response = payoff.pay_off()
+
+    assert response.json()["period"] == "2026-12"
+
+
+def test_an_archived_card_can_be_paid_off(payoff: Payoff) -> None:
+    payoff.client.delete(
+        f"{payoff.base}/cards/{payoff.card['id']}", headers=payoff.headers
+    )
+
+    assert payoff.pay_off(period="2026-12").status_code == 201
+
+
+def test_paying_off_a_missing_card_is_not_found(payoff: Payoff) -> None:
+    assert payoff.pay_off(999, period="2026-12").status_code == 404
+
+
+def test_paying_off_an_invalid_period_is_rejected(payoff: Payoff) -> None:
+    assert payoff.pay_off(period="2026-13").status_code == 422
+
+
+def test_the_payoff_prepayments_are_deleted_one_by_one(payoff: Payoff) -> None:
+    [prepayment] = payoff.pay_off(period="2026-12").json()["prepayments"]
+
+    response = payoff.client.delete(
+        f"{payoff.base}/expenses/{payoff.tv['id']}/prepayments/{prepayment['id']}",
+        params={"confirm": "true"},
+        headers=payoff.headers,
+    )
+
+    assert response.status_code == 204
+    assert len(payoff.schedule(payoff.tv)["installments"]) == 6

@@ -165,7 +165,7 @@ una compra con abonos.
 - Hecho cuando: los tests pasan.
 - RF: RF-16, RF-22 a RF-28.
 
-## [ ] T7 — Pagar todo
+## [x] T7 — Pagar todo
 `debts.pay_off` y `POST /cards/{card_id}/payoff` en `cards.py`, con
 `PayoffIn` y `PayoffOut`. Se apoya en los abonos de T6.
 
